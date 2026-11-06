@@ -117,7 +117,8 @@ export class GameScene extends Phaser.Scene {
   private createCat() {
     this.catX = this.scale.width / 2
     this.catTargetX = this.catX
-    this.catY = Math.min(this.scale.height - 100, this.scale.height * 0.85)
+    const hudBottomMargin = Math.max(80, this.targetFontSize + 40)
+    this.catY = this.scale.height - hudBottomMargin - 40
     this.catJumpStartY = this.catY
     this.cat = this.add.graphics()
     this.drawCat(this.cat, this.catX, this.catY)
@@ -148,17 +149,23 @@ export class GameScene extends Phaser.Scene {
 
   private createUI() {
     const centerX = this.scale.width / 2
-    const titleSize = Math.max(20, Math.min(32, this.scale.width / 15))
+    const titleSize = Math.max(18, Math.min(28, this.scale.width / 18))
     const hudSize = Math.max(16, Math.min(24, this.scale.width / 20))
-    const muteSize = Math.max(48, Math.min(80, this.scale.width / 8))
+    const muteSize = Math.max(64, Math.min(80, this.scale.width / 6))
     
-    this.add.text(centerX, Math.max(10, titleSize / 2), 'Котето и балоните', {
+    const controlRowHeight = Math.max(muteSize + 20, 84)
+    const titleRowMargin = 10
+    const titleY = controlRowHeight + titleRowMargin + titleSize / 2
+    
+    this.add.text(centerX, titleY, 'Котето и балоните', {
       fontSize: `${titleSize}px`,
       color: '#FF1493',
       fontStyle: 'bold'
     }).setOrigin(0.5)
 
-    const targetY = Math.max(this.scale.height - 70, this.scale.height * 0.9)
+    const hudBottomMargin = Math.max(80, this.targetFontSize + 40)
+    const targetY = this.scale.height - hudBottomMargin + 15
+    
     this.add.text(10, targetY, 'Цел:', {
       fontSize: `${hudSize}px`,
       color: '#000000',
@@ -173,7 +180,7 @@ export class GameScene extends Phaser.Scene {
       padding: { x: 8, y: 4 }
     })
 
-    this.starsText = this.add.text(10, Math.max(titleSize + 20, 40), '', {
+    this.starsText = this.add.text(10, titleY + titleSize / 2 + 10, '', {
       fontSize: `${hudSize}px`,
       color: '#FFD700',
       fontStyle: 'bold'
@@ -193,7 +200,7 @@ export class GameScene extends Phaser.Scene {
     }).setOrigin(0.5).setVisible(false)
 
     this.muteButton = this.add.text(this.scale.width - muteSize - 10, 10, '🔊', {
-      fontSize: `${muteSize}px`
+      fontSize: `${muteSize * 0.8}px`
     }).setInteractive(
       new Phaser.Geom.Rectangle(0, 0, muteSize, muteSize),
       Phaser.Geom.Rectangle.Contains
@@ -212,8 +219,8 @@ export class GameScene extends Phaser.Scene {
     this.settingsButton = document.createElement('button')
     this.settingsButton.textContent = '⚙️'
     this.settingsButton.setAttribute('data-testid', 'button-settings')
-    const buttonSize = Math.max(48, Math.min(64, window.innerWidth / 10))
-    const muteSize = Math.max(48, Math.min(80, window.innerWidth / 8))
+    const buttonSize = Math.max(64, Math.min(72, window.innerWidth / 6))
+    const muteSize = Math.max(64, Math.min(80, window.innerWidth / 6))
     const rightOffset = muteSize + 20
     this.settingsButton.style.cssText = `
       position: fixed;
@@ -248,12 +255,22 @@ export class GameScene extends Phaser.Scene {
 
     const count = this.gameState.round.balloons.length
     
-    const titleSize = Math.max(20, Math.min(32, this.scale.width / 15))
-    const hudTopSpace = Math.max(titleSize + 50, 60)
-    const hudBottomSpace = Math.max(80, this.scale.height * 0.15)
+    const titleSize = Math.max(18, Math.min(28, this.scale.width / 18))
+    const muteSize = Math.max(64, Math.min(80, this.scale.width / 6))
+    const controlRowHeight = Math.max(muteSize + 20, 84)
+    const titleRowMargin = 10
+    const titleRowHeight = titleRowMargin + titleSize + 15
+    const hudTopSpace = controlRowHeight + titleRowHeight + 10
+    
+    const hudBottomMargin = Math.max(80, this.targetFontSize + 40)
+    const catHeight = 80
+    const catTopMargin = 30
+    const catBottomMargin = 20
+    const hudBottomSpace = hudBottomMargin + catHeight + catTopMargin + catBottomMargin
+    
     const availableHeight = this.scale.height - hudTopSpace - hudBottomSpace
     const availableWidth = this.scale.width
-    const margin = Math.max(10, this.scale.width * 0.03)
+    const margin = Math.max(15, this.scale.width * 0.04)
     
     const minTarget = 64
     const padding = 20
@@ -269,8 +286,23 @@ export class GameScene extends Phaser.Scene {
     const maxFormulaWidth = Math.max(...tempTexts.map(t => t.width))
     tempTexts.forEach(t => t.destroy())
     
-    const balloonWidth = Math.max(minTarget, maxFormulaWidth + padding * 2)
-    const balloonHeight = Math.max(minTarget, Math.min(balloonWidth * 0.8, availableHeight / count))
+    const minBalloonWidth = Math.max(minTarget, maxFormulaWidth + padding * 2)
+    let balloonWidth = minBalloonWidth
+    let balloonHeight = Math.max(minTarget, balloonWidth * 0.75)
+    
+    if (count >= 4) {
+      const maxWidthForTwoCols = (availableWidth - 3 * margin) / 2
+      if (balloonWidth > maxWidthForTwoCols) {
+        balloonWidth = Math.max(minTarget, maxWidthForTwoCols)
+        balloonHeight = Math.max(minTarget, balloonWidth * 0.75)
+      }
+      
+      const neededHeight = count === 4 ? 2 * balloonHeight + 3 * margin : 3 * balloonHeight + 4 * margin
+      if (neededHeight > availableHeight) {
+        const maxHeight = count === 4 ? (availableHeight - 3 * margin) / 2 : (availableHeight - 4 * margin) / 3
+        balloonHeight = Math.max(minTarget, maxHeight)
+      }
+    }
     
     let positions: Array<{ x: number; y: number }> = []
     
@@ -287,19 +319,23 @@ export class GameScene extends Phaser.Scene {
         }))
       } else {
         const x = availableWidth / 2
-        const rowSpacing = (availableHeight - count * balloonHeight) / (count + 1)
+        const totalHeight = count * balloonHeight + (count - 1) * margin
+        const topMargin = (availableHeight - totalHeight) / 2
         positions = Array.from({ length: count }, (_, i) => ({
           x,
-          y: hudTopSpace + rowSpacing + i * (balloonHeight + rowSpacing) + balloonHeight / 2
+          y: hudTopSpace + topMargin + i * (balloonHeight + margin) + balloonHeight / 2
         }))
       }
     } else if (count === 4) {
-      const colSpacing = (availableWidth - 2 * balloonWidth) / 3
-      const col1 = colSpacing + balloonWidth / 2
-      const col2 = colSpacing + balloonWidth + colSpacing + balloonWidth / 2
-      const rowSpacing = (availableHeight - 2 * balloonHeight) / 3
-      const y1 = hudTopSpace + rowSpacing + balloonHeight / 2
-      const y2 = y1 + balloonHeight + rowSpacing
+      const totalWidth = 2 * balloonWidth + margin
+      const leftMargin = (availableWidth - totalWidth) / 2
+      const col1 = leftMargin + balloonWidth / 2
+      const col2 = col1 + balloonWidth + margin
+      
+      const totalHeight = 2 * balloonHeight + margin
+      const topMargin = (availableHeight - totalHeight) / 2
+      const y1 = hudTopSpace + topMargin + balloonHeight / 2
+      const y2 = y1 + balloonHeight + margin
       
       positions = [
         { x: col1, y: y1 },
@@ -308,14 +344,17 @@ export class GameScene extends Phaser.Scene {
         { x: col2, y: y2 }
       ]
     } else {
-      const colSpacing = (availableWidth - 2 * balloonWidth) / 3
-      const col1 = colSpacing + balloonWidth / 2
-      const col2 = colSpacing + balloonWidth + colSpacing + balloonWidth / 2
+      const totalWidth = 2 * balloonWidth + margin
+      const leftMargin = (availableWidth - totalWidth) / 2
+      const col1 = leftMargin + balloonWidth / 2
+      const col2 = col1 + balloonWidth + margin
       const colCenter = availableWidth / 2
-      const rowSpacing = (availableHeight - 3 * balloonHeight) / 4
-      const y1 = hudTopSpace + rowSpacing + balloonHeight / 2
-      const y2 = y1 + balloonHeight + rowSpacing
-      const y3 = y2 + balloonHeight + rowSpacing
+      
+      const totalHeight = 3 * balloonHeight + 2 * margin
+      const topMargin = (availableHeight - totalHeight) / 2
+      const y1 = hudTopSpace + topMargin + balloonHeight / 2
+      const y2 = y1 + balloonHeight + margin
+      const y3 = y2 + balloonHeight + margin
       
       positions = [
         { x: colCenter, y: y1 },
@@ -652,7 +691,9 @@ export class GameScene extends Phaser.Scene {
           bs.sprite.alpha = 1
         }
 
-        if (bs.y > this.scale.height - 150) {
+        const catTopY = this.catJumpStartY - 40
+        const resetMargin = 30
+        if (bs.y > catTopY - resetMargin) {
           this.gameState.round = resetBalloons(this.gameState.round)
           this.createBalloons()
         }
