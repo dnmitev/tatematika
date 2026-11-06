@@ -93,11 +93,18 @@ export class GameScene extends Phaser.Scene {
   }
   
   private calculateFontSizes() {
-    const scale = Math.min(this.scale.width / 800, this.scale.height / 600)
     const minCSSPixels = 32
-    const minGamePixels = minCSSPixels / scale
-    this.formulaFontSize = Math.max(80, minGamePixels)
-    this.targetFontSize = Math.max(80, minGamePixels)
+    const canvas = document.querySelector('canvas')
+    if (canvas) {
+      const rect = canvas.getBoundingClientRect()
+      const scale = rect.width / 800
+      const minGamePixels = minCSSPixels / scale
+      this.formulaFontSize = Math.max(minGamePixels, 48)
+      this.targetFontSize = Math.max(minGamePixels, 56)
+    } else {
+      this.formulaFontSize = 48
+      this.targetFontSize = 56
+    }
   }
 
   private handleResize(gameSize: Phaser.Structs.Size) {
@@ -227,40 +234,68 @@ export class GameScene extends Phaser.Scene {
     })
     this.balloonSprites = []
 
-    const balloonRadius = 100
     const count = this.gameState.round.balloons.length
     
+    const canvas = document.querySelector('canvas')
+    const scale = canvas ? canvas.getBoundingClientRect().width / 800 : 1
+    const minCSSTarget = 64
+    const minGameTarget = minCSSTarget / scale
+    
+    const hudTop = 60
+    const hudBottom = 110
+    const availableHeight = 600 - hudTop - hudBottom
+    
+    const maxBalloonDiameter = count === 5 ? Math.min(minGameTarget, availableHeight / 3.5) : Math.min(minGameTarget, availableHeight)
+    
+    let balloonRadius: number
     let positions: Array<{ x: number; y: number }> = []
     
     if (count <= 3) {
+      balloonRadius = Math.min(maxBalloonDiameter / 2, 80)
       const balloonWidth = balloonRadius * 1.5 * 2
-      const totalBalloonWidth = count * balloonWidth
-      const availableWidth = this.scale.width
-      const spacing = (availableWidth - totalBalloonWidth) / (count + 1)
+      const totalWidth = count * balloonWidth
+      const spacing = Math.max(20, (800 - totalWidth) / (count + 1))
+      const y = hudTop + availableHeight / 2
       
       positions = this.gameState.round.balloons.map((_, index) => ({
         x: spacing + balloonRadius * 1.5 + index * (balloonWidth + spacing),
-        y: 150
+        y
       }))
     } else if (count === 4) {
-      const col1 = this.scale.width * 0.3
-      const col2 = this.scale.width * 0.7
+      balloonRadius = Math.min(maxBalloonDiameter / 2, 70)
+      const balloonWidth = balloonRadius * 1.5 * 2
+      const balloonHeight = balloonRadius * 2
+      const colSpacing = Math.max(20, (800 - 2 * balloonWidth) / 3)
+      const col1 = colSpacing + balloonRadius * 1.5
+      const col2 = colSpacing + balloonWidth + colSpacing + balloonRadius * 1.5
+      const rowSpacing = Math.max(10, (availableHeight - 2 * balloonHeight) / 3)
+      const row1Y = hudTop + rowSpacing + balloonRadius
+      const row2Y = hudTop + rowSpacing + balloonHeight + rowSpacing + balloonRadius
+      
       positions = [
-        { x: col1, y: 150 },
-        { x: col2, y: 150 },
-        { x: col1, y: 280 },
-        { x: col2, y: 280 }
+        { x: col1, y: row1Y },
+        { x: col2, y: row1Y },
+        { x: col1, y: row2Y },
+        { x: col2, y: row2Y }
       ]
     } else {
-      const col1 = this.scale.width * 0.25
-      const col2 = this.scale.width * 0.5
-      const col3 = this.scale.width * 0.75
+      balloonRadius = Math.min(maxBalloonDiameter / 2, 60)
+      const balloonWidth = balloonRadius * 1.5 * 2
+      const balloonHeight = balloonRadius * 2
+      const colSpacing = Math.max(20, (800 - 2 * balloonWidth) / 3)
+      const col1 = colSpacing + balloonRadius * 1.5
+      const col2 = colSpacing + balloonWidth + colSpacing + balloonRadius * 1.5
+      const rowSpacing = Math.max(5, (availableHeight - 3 * balloonHeight) / 4)
+      const row1Y = hudTop + rowSpacing + balloonRadius
+      const row2Y = hudTop + rowSpacing + balloonHeight + rowSpacing + balloonRadius
+      const row3Y = hudTop + rowSpacing + balloonHeight + rowSpacing + balloonHeight + rowSpacing + balloonRadius
+      
       positions = [
-        { x: col2, y: 130 },
-        { x: col1, y: 230 },
-        { x: col3, y: 230 },
-        { x: col1 + (col2 - col1) * 0.5, y: 340 },
-        { x: col2 + (col3 - col2) * 0.5, y: 340 }
+        { x: 400, y: row1Y },
+        { x: col1, y: row2Y },
+        { x: col2, y: row2Y },
+        { x: col1, y: row3Y },
+        { x: col2, y: row3Y }
       ]
     }
     
@@ -268,10 +303,12 @@ export class GameScene extends Phaser.Scene {
       const { x, y } = positions[index]
 
       const sprite = this.add.graphics()
-      this.drawBalloon(sprite, 0, 0, balloon.isCorrect, balloonRadius)
+      const balloonWidth = balloonRadius * 1.5 * 2
+      const balloonHeight = balloonRadius * 2
+      this.drawBalloon(sprite, 0, 0, balloon.isCorrect, balloonWidth, balloonHeight)
       sprite.setPosition(x, y)
       sprite.setInteractive(
-        new Phaser.Geom.Ellipse(0, 0, balloonRadius * 1.5 * 2, balloonRadius * 2),
+        new Phaser.Geom.Ellipse(0, 0, balloonWidth, balloonHeight),
         Phaser.Geom.Ellipse.Contains
       )
       sprite.on('pointerdown', () => this.handleBalloonClick(balloon.id))
@@ -296,12 +333,9 @@ export class GameScene extends Phaser.Scene {
     })
   }
 
-  private drawBalloon(graphics: Phaser.GameObjects.Graphics, x: number, y: number, isCorrect: boolean, radius: number = 100) {
+  private drawBalloon(graphics: Phaser.GameObjects.Graphics, x: number, y: number, isCorrect: boolean, width: number, height: number) {
     const colors = [0xFF6B6B, 0xFFD93D, 0x6BCB77, 0x4D96FF, 0xA78BFA]
     const color = colors[Math.floor(Math.random() * colors.length)]
-    
-    const width = radius * 1.5 * 2
-    const height = radius * 2
     
     graphics.fillStyle(color, 0.9)
     graphics.fillEllipse(x, y, width, height)
@@ -326,13 +360,16 @@ export class GameScene extends Phaser.Scene {
     if (this.settingsUI && this.settingsUI.isOpen()) return
     
     for (const balloon of this.balloonSprites) {
-      const radiusX = 135
-      const radiusY = 90
-      const dx = (pointer.x - balloon.x) / radiusX
-      const dy = (pointer.y - balloon.y) / radiusY
-      if (dx * dx + dy * dy <= 1) {
-        this.handleBalloonClick(balloon.id)
-        break
+      if (balloon.sprite && balloon.sprite.input) {
+        const hitArea = balloon.sprite.input.hitArea as Phaser.Geom.Ellipse
+        const radiusX = hitArea.width / 2
+        const radiusY = hitArea.height / 2
+        const dx = (pointer.x - balloon.x) / radiusX
+        const dy = (pointer.y - balloon.y) / radiusY
+        if (dx * dx + dy * dy <= 1) {
+          this.handleBalloonClick(balloon.id)
+          break
+        }
       }
     }
   }
