@@ -135,7 +135,11 @@ window.__tatematika = {
     return gameScene.getLastPlayedSound()
   },
   getSoundPlayCount() {
-    throw new Error('not implemented')
+    const gameScene = getGameScene()
+    if (!gameScene) {
+      return 0
+    }
+    return gameScene.getSoundPlayCount()
   },
   getFormulaFontSize() {
     const gameScene = getGameScene()

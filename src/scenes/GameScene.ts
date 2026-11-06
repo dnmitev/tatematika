@@ -41,6 +41,7 @@ export class GameScene extends Phaser.Scene {
   private praiseIndex: number = 0
   private levelEndText: string | null = null
   private lastPlayedSound: string | null = null
+  private soundPlayCount: number = 0
   private pendingJumpBalloonId: string | null = null
   
   private settingsUI!: SettingsUI
@@ -353,6 +354,7 @@ export class GameScene extends Phaser.Scene {
     if (this.isMuted) return
     
     this.lastPlayedSound = soundName
+    this.soundPlayCount++
     
     const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
     const oscillator = audioContext.createOscillator()
@@ -652,6 +654,10 @@ export class GameScene extends Phaser.Scene {
 
   public getLastPlayedSound() {
     return this.lastPlayedSound
+  }
+
+  public getSoundPlayCount() {
+    return this.soundPlayCount
   }
 
   public getFormulaFontSize() {
