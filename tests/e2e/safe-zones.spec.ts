@@ -1,28 +1,21 @@
 import { test, expect } from '@playwright/test'
+import { getAllBalloonEllipses, getCatPaintedBounds, popCorrectBalloonAndWait } from './helpers'
 
 /**
  * Safe Zone Tests - Balloon Collision Detection
  * 
- * Verifies painted balloon ellipses (measured via commandBuffer) do not intersect:
+ * Verifies painted balloon ellipses do not intersect:
  * (a) Title text bounds
  * (b) Control bounds (mute, settings, any HUD buttons)
- * (c) Cat's painted geometry including ears (union of Graphics commandBuffer bounds)
+ * (c) Cat's painted geometry including ears
  * 
- * Uses accurate ellipse-vs-rectangle intersection, not just bounding box checks.
+ * Uses accurate ellipse-vs-rectangle intersection.
  * 
  * Tests across:
  * - Counts: 3, 4, 5
  * - Viewports: 320×568, 375×667, 1280×800
- * - States: initial frame, after pop (cat moved), after reset
+ * - States: initial frame, after pop (cat moved), mid-jump, after reset
  */
-
-interface BalloonEllipse {
-  id: string
-  centerX: number
-  centerY: number
-  radiusX: number
-  radiusY: number
-}
 
 interface AABB {
   left: number
@@ -35,7 +28,6 @@ interface AABB {
 
 /**
  * Accurate ellipse vs AABB intersection test
- * Returns true if ellipse intersects rectangle
  */
 function ellipseIntersectsAABB(
   ellipseCenterX: number,
@@ -47,11 +39,9 @@ function ellipseIntersectsAABB(
   boxRight: number,
   boxBottom: number
 ): boolean {
-  // Find closest point on AABB to ellipse center
   const closestX = Math.max(boxLeft, Math.min(ellipseCenterX, boxRight))
   const closestY = Math.max(boxTop, Math.min(ellipseCenterY, boxBottom))
   
-  // Check if closest point is inside ellipse
   const dx = closestX - ellipseCenterX
   const dy = closestY - ellipseCenterY
   
@@ -59,105 +49,11 @@ function ellipseIntersectsAABB(
          (dy * dy) / (ellipseRadiusY * ellipseRadiusY) <= 1
 }
 
-/**
- * Get all balloon ellipses using validated commandBuffer method
- */
-async function getAllBalloonEllipses(page: any): Promise<BalloonEllipse[]> {
-  return await page.evaluate(() => {
-    const game = window.__tatematika!.getGame()
-    const scene = game.scene.getScene('GameScene') as any
-    const balloonSprites = scene.balloonSprites
-    
-    const Commands = { BEGIN_PATH: 1, LINE_TO: 4, MOVE_TO: 5, FILL_PATH: 8 }
-    
-    return balloonSprites.map((bs: any) => {
-      const sprite = bs.sprite as any
-      const commandBuffer = sprite.commandBuffer
-      
-      // Find all filled paths
-      const filledPaths: Array<Array<{ x: number; y: number }>> = []
-      let currentPath: Array<{ x: number; y: number }> = []
-      let inPath = false
-      
-      for (let i = 0; i < commandBuffer.length; i++) {
-        const cmd = commandBuffer[i]
-        
-        if (cmd === Commands.BEGIN_PATH) {
-          currentPath = []
-          inPath = true
-        } else if (cmd === Commands.MOVE_TO && inPath) {
-          currentPath.push({ x: commandBuffer[i + 1], y: commandBuffer[i + 2] })
-          i += 2
-        } else if (cmd === Commands.LINE_TO && inPath) {
-          currentPath.push({ x: commandBuffer[i + 1], y: commandBuffer[i + 2] })
-          i += 2
-        } else if (cmd === Commands.FILL_PATH && inPath) {
-          if (currentPath.length > 0) {
-            filledPaths.push([...currentPath])
-          }
-          currentPath = []
-          inPath = false
-        }
-      }
-      
-      // Find largest path (main balloon)
-      let largestPath: Array<{ x: number; y: number }> = []
-      let largestArea = 0
-      
-      for (const path of filledPaths) {
-        if (path.length < 3) continue
-        
-        let minX = Infinity, maxX = -Infinity
-        let minY = Infinity, maxY = -Infinity
-        
-        for (const point of path) {
-          minX = Math.min(minX, point.x)
-          maxX = Math.max(maxX, point.x)
-          minY = Math.min(minY, point.y)
-          maxY = Math.max(maxY, point.y)
-        }
-        
-        const area = (maxX - minX) * (maxY - minY)
-        if (area > largestArea) {
-          largestArea = area
-          largestPath = path
-        }
-      }
-      
-      // Compute bounds
-      let minX = Infinity, maxX = -Infinity
-      let minY = Infinity, maxY = -Infinity
-      
-      for (const point of largestPath) {
-        minX = Math.min(minX, point.x)
-        maxX = Math.max(maxX, point.x)
-        minY = Math.min(minY, point.y)
-        maxY = Math.max(maxY, point.y)
-      }
-      
-      const width = maxX - minX
-      const height = maxY - minY
-      
-      return {
-        id: bs.id,
-        centerX: bs.x,
-        centerY: bs.y,
-        radiusX: width / 2,
-        radiusY: height / 2
-      }
-    })
-  })
-}
-
-/**
- * Get title bounds (Phaser Text object)
- */
 async function getTitleBounds(page: any): Promise<AABB> {
   return await page.evaluate(() => {
     const game = window.__tatematika!.getGame()
     const scene = game.scene.getScene('GameScene') as any
     
-    // Find title text by content
     const titleText = scene.children.list.find((child: any) => 
       child.type === 'Text' && child.text === 'Котето и балоните'
     )
@@ -179,16 +75,12 @@ async function getTitleBounds(page: any): Promise<AABB> {
   })
 }
 
-/**
- * Get all control bounds (mute button, settings button)
- */
 async function getControlBounds(page: any): Promise<{ name: string; bounds: AABB }[]> {
   return await page.evaluate(() => {
     const game = window.__tatematika!.getGame()
     const scene = game.scene.getScene('GameScene') as any
     const controls: { name: string; bounds: AABB }[] = []
     
-    // Mute button (Phaser Text)
     if (scene.muteButton) {
       const bounds = scene.muteButton.getBounds()
       controls.push({
@@ -208,9 +100,6 @@ async function getControlBounds(page: any): Promise<{ name: string; bounds: AABB
   })
 }
 
-/**
- * Get settings button bounds (DOM element)
- */
 async function getSettingsButtonBounds(page: any): Promise<AABB | null> {
   const settingsButton = page.locator('[data-testid="button-settings"]')
   const isVisible = await settingsButton.isVisible().catch(() => false)
@@ -224,7 +113,6 @@ async function getSettingsButtonBounds(page: any): Promise<AABB | null> {
     return null
   }
   
-  // Convert CSS coords to game coords
   const { canvasRect, scale } = await page.evaluate(() => {
     const game = window.__tatematika!.getGame()
     const canvas = document.querySelector('canvas')!
@@ -253,118 +141,8 @@ async function getSettingsButtonBounds(page: any): Promise<AABB | null> {
   }
 }
 
-/**
- * Get cat's painted bounds from Graphics commandBuffer
- * Includes all filled shapes (body, ears, eyes)
- */
-async function getCatPaintedBounds(page: any): Promise<AABB> {
-  return await page.evaluate(() => {
-    const game = window.__tatematika!.getGame()
-    const scene = game.scene.getScene('GameScene') as any
-    const catGraphics = scene.cat
-    
-    // Phaser Graphics Commands
-    const Commands = {
-      ARC: 0,
-      BEGIN_PATH: 1,
-      CLOSE_PATH: 2,
-      FILL_RECT: 3,
-      LINE_TO: 4,
-      MOVE_TO: 5,
-      LINE_STYLE: 6,
-      FILL_STYLE: 7,
-      FILL_PATH: 8,
-      STROKE_PATH: 9,
-      FILL_TRIANGLE: 10
-    }
-    
-    const commandBuffer = catGraphics.commandBuffer
-    
-    // Collect all points from all drawing commands
-    const allPoints: Array<{ x: number; y: number }> = []
-    let currentPath: Array<{ x: number; y: number }> = []
-    
-    let i = 0
-    while (i < commandBuffer.length) {
-      const cmd = commandBuffer[i]
-      i++
-      
-      if (cmd === Commands.MOVE_TO) {
-        currentPath.push({ x: commandBuffer[i], y: commandBuffer[i + 1] })
-        i += 2
-      } else if (cmd === Commands.LINE_TO) {
-        currentPath.push({ x: commandBuffer[i], y: commandBuffer[i + 1] })
-        i += 2
-      } else if (cmd === Commands.FILL_PATH) {
-        // Path complete, add to all points
-        allPoints.push(...currentPath)
-        currentPath = []
-      } else if (cmd === Commands.STROKE_PATH) {
-        // Stroked paths aren't filled, don't count them
-        currentPath = []
-      } else if (cmd === Commands.FILL_TRIANGLE) {
-        // FILL_TRIANGLE: x1, y1, x2, y2, x3, y3
-        allPoints.push({ x: commandBuffer[i], y: commandBuffer[i + 1] })
-        allPoints.push({ x: commandBuffer[i + 2], y: commandBuffer[i + 3] })
-        allPoints.push({ x: commandBuffer[i + 4], y: commandBuffer[i + 5] })
-        i += 6
-      } else if (cmd === Commands.BEGIN_PATH) {
-        // Start fresh path
-        currentPath = []
-      } else if (cmd === Commands.CLOSE_PATH) {
-        // Path closed but not necessarily filled yet
-      } else if (cmd === Commands.FILL_STYLE) {
-        // Skip color and alpha
-        i += 2
-      } else if (cmd === Commands.LINE_STYLE) {
-        // Skip width, color, alpha
-        i += 3
-      } else if (cmd === Commands.ARC) {
-        // Skip x, y, radius, startAngle, endAngle, anticlockwise
-        i += 6
-      }
-    }
-    
-    // Add any remaining path
-    if (currentPath.length > 0) {
-      allPoints.push(...currentPath)
-    }
-    
-    // Compute bounding box of all painted points
-    if (allPoints.length === 0) {
-      throw new Error('No painted points found in cat Graphics')
-    }
-    
-    let minX = Infinity, maxX = -Infinity
-    let minY = Infinity, maxY = -Infinity
-    
-    for (const point of allPoints) {
-      if (typeof point.x === 'number' && typeof point.y === 'number') {
-        minX = Math.min(minX, point.x)
-        maxX = Math.max(maxX, point.x)
-        minY = Math.min(minY, point.y)
-        maxY = Math.max(maxY, point.y)
-      }
-    }
-    
-    return {
-      left: minX,
-      top: minY,
-      right: maxX,
-      bottom: maxY,
-      width: maxX - minX,
-      height: maxY - minY
-    }
-  })
-}
-
-/**
- * Helper: set balloon count via settings
- */
 async function setBalloonCount(page: any, count: number) {
-  await page.evaluate((c: number) => {
-    window.__tatematika!.openSettings()
-  }, count)
+  await page.evaluate(() => window.__tatematika!.openSettings())
   
   const balloonCountInput = page.locator('[data-testid="setting-balloon-count"]').first()
   await balloonCountInput.fill(String(count))
@@ -372,7 +150,6 @@ async function setBalloonCount(page: any, count: number) {
   await page.evaluate(() => window.__tatematika!.closeSettings())
   await page.waitForTimeout(200)
   
-  // Verify count took effect
   const actualCount = await page.evaluate(() => {
     const game = window.__tatematika!.getGame()
     const scene = game.scene.getScene('GameScene') as any
@@ -382,29 +159,14 @@ async function setBalloonCount(page: any, count: number) {
   expect(actualCount).toBe(count)
 }
 
-/**
- * Test safe zones for a given viewport and count
- */
-async function testSafeZones(page: any, viewport: string, count: number) {
-  console.log(`\n=== ${viewport} - Count ${count} ===`)
-  
-  await setBalloonCount(page, count)
-  
-  // Get all collision zones
+async function checkSafeZones(page: any, viewport: string, count: number, phase: string) {
   const balloons = await getAllBalloonEllipses(page)
   const title = await getTitleBounds(page)
   const controls = await getControlBounds(page)
   const settingsBtn = await getSettingsButtonBounds(page)
   const cat = await getCatPaintedBounds(page)
   
-  console.log(`Balloons: ${balloons.length}`)
-  console.log(`Title: (${title.left.toFixed(1)}, ${title.top.toFixed(1)}) to (${title.right.toFixed(1)}, ${title.bottom.toFixed(1)})`)
-  console.log(`Cat: (${cat.left.toFixed(1)}, ${cat.top.toFixed(1)}) to (${cat.right.toFixed(1)}, ${cat.bottom.toFixed(1)})`)
-  
-  // Check each balloon against all safe zones
   for (const balloon of balloons) {
-    console.log(`Balloon ${balloon.id}: center (${balloon.centerX.toFixed(1)}, ${balloon.centerY.toFixed(1)}), radii (${balloon.radiusX.toFixed(1)}, ${balloon.radiusY.toFixed(1)})`)
-    
     // Check vs title
     const titleCollision = ellipseIntersectsAABB(
       balloon.centerX, balloon.centerY,
@@ -413,7 +175,7 @@ async function testSafeZones(page: any, viewport: string, count: number) {
     )
     
     expect(titleCollision, 
-      `${viewport} count ${count}: Balloon ${balloon.id} at (${balloon.centerX.toFixed(1)}, ${balloon.centerY.toFixed(1)}) ` +
+      `${viewport} count ${count} ${phase}: Balloon ${balloon.id} at (${balloon.centerX.toFixed(1)}, ${balloon.centerY.toFixed(1)}) ` +
       `intersects title at (${title.left.toFixed(1)}, ${title.top.toFixed(1)}) to (${title.right.toFixed(1)}, ${title.bottom.toFixed(1)})`
     ).toBe(false)
     
@@ -427,13 +189,13 @@ async function testSafeZones(page: any, viewport: string, count: number) {
       )
       
       expect(controlCollision,
-        `${viewport} count ${count}: Balloon ${balloon.id} at (${balloon.centerX.toFixed(1)}, ${balloon.centerY.toFixed(1)}) ` +
+        `${viewport} count ${count} ${phase}: Balloon ${balloon.id} at (${balloon.centerX.toFixed(1)}, ${balloon.centerY.toFixed(1)}) ` +
         `intersects ${control.name} button at (${control.bounds.left.toFixed(1)}, ${control.bounds.top.toFixed(1)}) ` +
         `to (${control.bounds.right.toFixed(1)}, ${control.bounds.bottom.toFixed(1)})`
       ).toBe(false)
     }
     
-    // Check vs settings button (if visible)
+    // Check vs settings button
     if (settingsBtn) {
       const settingsCollision = ellipseIntersectsAABB(
         balloon.centerX, balloon.centerY,
@@ -443,7 +205,7 @@ async function testSafeZones(page: any, viewport: string, count: number) {
       )
       
       expect(settingsCollision,
-        `${viewport} count ${count}: Balloon ${balloon.id} at (${balloon.centerX.toFixed(1)}, ${balloon.centerY.toFixed(1)}) ` +
+        `${viewport} count ${count} ${phase}: Balloon ${balloon.id} at (${balloon.centerX.toFixed(1)}, ${balloon.centerY.toFixed(1)}) ` +
         `intersects settings button at (${settingsBtn.left.toFixed(1)}, ${settingsBtn.top.toFixed(1)}) ` +
         `to (${settingsBtn.right.toFixed(1)}, ${settingsBtn.bottom.toFixed(1)})`
       ).toBe(false)
@@ -457,7 +219,7 @@ async function testSafeZones(page: any, viewport: string, count: number) {
     )
     
     expect(catCollision,
-      `${viewport} count ${count}: Balloon ${balloon.id} at (${balloon.centerX.toFixed(1)}, ${balloon.centerY.toFixed(1)}) ` +
+      `${viewport} count ${count} ${phase}: Balloon ${balloon.id} at (${balloon.centerX.toFixed(1)}, ${balloon.centerY.toFixed(1)}) ` +
       `intersects cat at (${cat.left.toFixed(1)}, ${cat.top.toFixed(1)}) to (${cat.right.toFixed(1)}, ${cat.bottom.toFixed(1)})`
     ).toBe(false)
   }
@@ -476,20 +238,9 @@ test.describe('Safe Zones - Synthetic Validation', () => {
     const cat = await getCatPaintedBounds(page)
     const catPosition = await page.evaluate(() => window.__tatematika!.getCatPosition())
     
-    console.log(`\n=== Cat Synthetic Validation ===`)
-    console.log(`Cat center: (${catPosition.x}, ${catPosition.y})`)
-    console.log(`Cat painted bounds: (${cat.left.toFixed(1)}, ${cat.top.toFixed(1)}) to (${cat.right.toFixed(1)}, ${cat.bottom.toFixed(1)})`)
-    console.log(`Cat height: ${cat.height.toFixed(1)}`)
-    
-    // From drawCat: body ellipse is at (x, y, 50, 45) = center ±25 horizontal, ±22.5 vertical
-    // Ears are triangles with points at y-40, so top of cat should be around catPosition.y - 40
-    
-    // The painted bounds should extend significantly above the center (ears)
     const topOffset = catPosition.y - cat.top
     
-    console.log(`Top offset (center to top): ${topOffset.toFixed(1)} px`)
-    
-    // Ears extend to y-40, so top offset should be at least 35px (allowing for some triangle geometry)
+    // Ears extend to y-40, so top offset should be at least 35px
     expect(topOffset, 'Cat measurement must include ears extending above body').toBeGreaterThan(35)
     
     // Bottom should be around y + 22.5 (half body height)
@@ -499,7 +250,7 @@ test.describe('Safe Zones - Synthetic Validation', () => {
   })
 })
 
-// Safe zones at initial frame
+// Initial frame tests
 test.describe('Safe Zones - Initial Frame - 320×568', () => {
   test.use({ viewport: { width: 320, height: 568 } })
   
@@ -508,19 +259,132 @@ test.describe('Safe Zones - Initial Frame - 320×568', () => {
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
   })
   
-  test('Count 3: No balloon overlaps title, controls, or cat', async ({ page }) => {
-    await testSafeZones(page, '320×568', 3)
+  test('Count 3: No balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 3)
+    await checkSafeZones(page, '320×568', 3, 'initial')
   })
   
-  test('Count 4: No balloon overlaps title, controls, or cat', async ({ page }) => {
-    await testSafeZones(page, '320×568', 4)
+  test('Count 4: No balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 4)
+    await checkSafeZones(page, '320×568', 4, 'initial')
   })
   
-  test('Count 5: No balloon overlaps title, controls, or cat', async ({ page }) => {
-    await testSafeZones(page, '320×568', 5)
+  test('Count 5: No balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 5)
+    await checkSafeZones(page, '320×568', 5, 'initial')
   })
 })
 
+test.describe('Safe Zones - After Pop - 320×568', () => {
+  test.use({ viewport: { width: 320, height: 568 } })
+  
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+  })
+  
+  test('Count 3: After pop, no balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 3)
+    await popCorrectBalloonAndWait(page)
+    await checkSafeZones(page, '320×568', 3, 'after-pop')
+  })
+  
+  test('Count 4: After pop, no balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 4)
+    await popCorrectBalloonAndWait(page)
+    await checkSafeZones(page, '320×568', 4, 'after-pop')
+  })
+  
+  test('Count 5: After pop, no balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 5)
+    await popCorrectBalloonAndWait(page)
+    await checkSafeZones(page, '320×568', 5, 'after-pop')
+  })
+})
+
+test.describe('Safe Zones - Mid Jump - 320×568', () => {
+  test.use({ viewport: { width: 320, height: 568 } })
+  
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+  })
+  
+  test('Count 3: Mid-jump, no balloon overlaps cat', async ({ page }) => {
+    await setBalloonCount(page, 3)
+    
+    const correct = await page.evaluate(() => {
+      const s = window.__tatematika!.getGameState()
+      return s.balloons.find((b: any) => b.isCorrect)!
+    })
+    
+    // Click and immediately check during jump
+    await page.evaluate((id: string) => window.__tatematika!.clickBalloon(id), correct.id)
+    await page.waitForTimeout(100) // Mid-jump
+    
+    await checkSafeZones(page, '320×568', 3, 'mid-jump')
+  })
+  
+  test('Count 4: Mid-jump, no balloon overlaps cat', async ({ page }) => {
+    await setBalloonCount(page, 4)
+    
+    const correct = await page.evaluate(() => {
+      const s = window.__tatematika!.getGameState()
+      return s.balloons.find((b: any) => b.isCorrect)!
+    })
+    
+    await page.evaluate((id: string) => window.__tatematika!.clickBalloon(id), correct.id)
+    await page.waitForTimeout(100)
+    
+    await checkSafeZones(page, '320×568', 4, 'mid-jump')
+  })
+  
+  test('Count 5: Mid-jump, no balloon overlaps cat', async ({ page }) => {
+    await setBalloonCount(page, 5)
+    
+    const correct = await page.evaluate(() => {
+      const s = window.__tatematika!.getGameState()
+      return s.balloons.find((b: any) => b.isCorrect)!
+    })
+    
+    await page.evaluate((id: string) => window.__tatematika!.clickBalloon(id), correct.id)
+    await page.waitForTimeout(100)
+    
+    await checkSafeZones(page, '320×568', 5, 'mid-jump')
+  })
+})
+
+test.describe('Safe Zones - After Reset - 320×568', () => {
+  test.use({ viewport: { width: 320, height: 568 } })
+  
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+  })
+  
+  test('Count 3: After reset, no balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 3)
+    await page.evaluate(() => window.__tatematika!.resetGame())
+    await page.waitForTimeout(300)
+    await checkSafeZones(page, '320×568', 3, 'after-reset')
+  })
+  
+  test('Count 4: After reset, no balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 4)
+    await page.evaluate(() => window.__tatematika!.resetGame())
+    await page.waitForTimeout(300)
+    await checkSafeZones(page, '320×568', 4, 'after-reset')
+  })
+  
+  test('Count 5: After reset, no balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 5)
+    await page.evaluate(() => window.__tatematika!.resetGame())
+    await page.waitForTimeout(300)
+    await checkSafeZones(page, '320×568', 5, 'after-reset')
+  })
+})
+
+// Repeat pattern for 375×667
 test.describe('Safe Zones - Initial Frame - 375×667', () => {
   test.use({ viewport: { width: 375, height: 667 } })
   
@@ -529,19 +393,131 @@ test.describe('Safe Zones - Initial Frame - 375×667', () => {
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
   })
   
-  test('Count 3: No balloon overlaps title, controls, or cat', async ({ page }) => {
-    await testSafeZones(page, '375×667', 3)
+  test('Count 3: No balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 3)
+    await checkSafeZones(page, '375×667', 3, 'initial')
   })
   
-  test('Count 4: No balloon overlaps title, controls, or cat', async ({ page }) => {
-    await testSafeZones(page, '375×667', 4)
+  test('Count 4: No balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 4)
+    await checkSafeZones(page, '375×667', 4, 'initial')
   })
   
-  test('Count 5: No balloon overlaps title, controls, or cat', async ({ page }) => {
-    await testSafeZones(page, '375×667', 5)
+  test('Count 5: No balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 5)
+    await checkSafeZones(page, '375×667', 5, 'initial')
   })
 })
 
+test.describe('Safe Zones - After Pop - 375×667', () => {
+  test.use({ viewport: { width: 375, height: 667 } })
+  
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+  })
+  
+  test('Count 3: After pop, no balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 3)
+    await popCorrectBalloonAndWait(page)
+    await checkSafeZones(page, '375×667', 3, 'after-pop')
+  })
+  
+  test('Count 4: After pop, no balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 4)
+    await popCorrectBalloonAndWait(page)
+    await checkSafeZones(page, '375×667', 4, 'after-pop')
+  })
+  
+  test('Count 5: After pop, no balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 5)
+    await popCorrectBalloonAndWait(page)
+    await checkSafeZones(page, '375×667', 5, 'after-pop')
+  })
+})
+
+test.describe('Safe Zones - Mid Jump - 375×667', () => {
+  test.use({ viewport: { width: 375, height: 667 } })
+  
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+  })
+  
+  test('Count 3: Mid-jump, no balloon overlaps cat', async ({ page }) => {
+    await setBalloonCount(page, 3)
+    
+    const correct = await page.evaluate(() => {
+      const s = window.__tatematika!.getGameState()
+      return s.balloons.find((b: any) => b.isCorrect)!
+    })
+    
+    await page.evaluate((id: string) => window.__tatematika!.clickBalloon(id), correct.id)
+    await page.waitForTimeout(100)
+    
+    await checkSafeZones(page, '375×667', 3, 'mid-jump')
+  })
+  
+  test('Count 4: Mid-jump, no balloon overlaps cat', async ({ page }) => {
+    await setBalloonCount(page, 4)
+    
+    const correct = await page.evaluate(() => {
+      const s = window.__tatematika!.getGameState()
+      return s.balloons.find((b: any) => b.isCorrect)!
+    })
+    
+    await page.evaluate((id: string) => window.__tatematika!.clickBalloon(id), correct.id)
+    await page.waitForTimeout(100)
+    
+    await checkSafeZones(page, '375×667', 4, 'mid-jump')
+  })
+  
+  test('Count 5: Mid-jump, no balloon overlaps cat', async ({ page }) => {
+    await setBalloonCount(page, 5)
+    
+    const correct = await page.evaluate(() => {
+      const s = window.__tatematika!.getGameState()
+      return s.balloons.find((b: any) => b.isCorrect)!
+    })
+    
+    await page.evaluate((id: string) => window.__tatematika!.clickBalloon(id), correct.id)
+    await page.waitForTimeout(100)
+    
+    await checkSafeZones(page, '375×667', 5, 'mid-jump')
+  })
+})
+
+test.describe('Safe Zones - After Reset - 375×667', () => {
+  test.use({ viewport: { width: 375, height: 667 } })
+  
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+  })
+  
+  test('Count 3: After reset, no balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 3)
+    await page.evaluate(() => window.__tatematika!.resetGame())
+    await page.waitForTimeout(300)
+    await checkSafeZones(page, '375×667', 3, 'after-reset')
+  })
+  
+  test('Count 4: After reset, no balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 4)
+    await page.evaluate(() => window.__tatematika!.resetGame())
+    await page.waitForTimeout(300)
+    await checkSafeZones(page, '375×667', 4, 'after-reset')
+  })
+  
+  test('Count 5: After reset, no balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 5)
+    await page.evaluate(() => window.__tatematika!.resetGame())
+    await page.waitForTimeout(300)
+    await checkSafeZones(page, '375×667', 5, 'after-reset')
+  })
+})
+
+// Repeat pattern for 1280×800
 test.describe('Safe Zones - Initial Frame - 1280×800', () => {
   test.use({ viewport: { width: 1280, height: 800 } })
   
@@ -550,15 +526,126 @@ test.describe('Safe Zones - Initial Frame - 1280×800', () => {
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
   })
   
-  test('Count 3: No balloon overlaps title, controls, or cat', async ({ page }) => {
-    await testSafeZones(page, '1280×800', 3)
+  test('Count 3: No balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 3)
+    await checkSafeZones(page, '1280×800', 3, 'initial')
   })
   
-  test('Count 4: No balloon overlaps title, controls, or cat', async ({ page }) => {
-    await testSafeZones(page, '1280×800', 4)
+  test('Count 4: No balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 4)
+    await checkSafeZones(page, '1280×800', 4, 'initial')
   })
   
-  test('Count 5: No balloon overlaps title, controls, or cat', async ({ page }) => {
-    await testSafeZones(page, '1280×800', 5)
+  test('Count 5: No balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 5)
+    await checkSafeZones(page, '1280×800', 5, 'initial')
+  })
+})
+
+test.describe('Safe Zones - After Pop - 1280×800', () => {
+  test.use({ viewport: { width: 1280, height: 800 } })
+  
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+  })
+  
+  test('Count 3: After pop, no balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 3)
+    await popCorrectBalloonAndWait(page)
+    await checkSafeZones(page, '1280×800', 3, 'after-pop')
+  })
+  
+  test('Count 4: After pop, no balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 4)
+    await popCorrectBalloonAndWait(page)
+    await checkSafeZones(page, '1280×800', 4, 'after-pop')
+  })
+  
+  test('Count 5: After pop, no balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 5)
+    await popCorrectBalloonAndWait(page)
+    await checkSafeZones(page, '1280×800', 5, 'after-pop')
+  })
+})
+
+test.describe('Safe Zones - Mid Jump - 1280×800', () => {
+  test.use({ viewport: { width: 1280, height: 800 } })
+  
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+  })
+  
+  test('Count 3: Mid-jump, no balloon overlaps cat', async ({ page }) => {
+    await setBalloonCount(page, 3)
+    
+    const correct = await page.evaluate(() => {
+      const s = window.__tatematika!.getGameState()
+      return s.balloons.find((b: any) => b.isCorrect)!
+    })
+    
+    await page.evaluate((id: string) => window.__tatematika!.clickBalloon(id), correct.id)
+    await page.waitForTimeout(100)
+    
+    await checkSafeZones(page, '1280×800', 3, 'mid-jump')
+  })
+  
+  test('Count 4: Mid-jump, no balloon overlaps cat', async ({ page }) => {
+    await setBalloonCount(page, 4)
+    
+    const correct = await page.evaluate(() => {
+      const s = window.__tatematika!.getGameState()
+      return s.balloons.find((b: any) => b.isCorrect)!
+    })
+    
+    await page.evaluate((id: string) => window.__tatematika!.clickBalloon(id), correct.id)
+    await page.waitForTimeout(100)
+    
+    await checkSafeZones(page, '1280×800', 4, 'mid-jump')
+  })
+  
+  test('Count 5: Mid-jump, no balloon overlaps cat', async ({ page }) => {
+    await setBalloonCount(page, 5)
+    
+    const correct = await page.evaluate(() => {
+      const s = window.__tatematika!.getGameState()
+      return s.balloons.find((b: any) => b.isCorrect)!
+    })
+    
+    await page.evaluate((id: string) => window.__tatematika!.clickBalloon(id), correct.id)
+    await page.waitForTimeout(100)
+    
+    await checkSafeZones(page, '1280×800', 5, 'mid-jump')
+  })
+})
+
+test.describe('Safe Zones - After Reset - 1280×800', () => {
+  test.use({ viewport: { width: 1280, height: 800 } })
+  
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+  })
+  
+  test('Count 3: After reset, no balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 3)
+    await page.evaluate(() => window.__tatematika!.resetGame())
+    await page.waitForTimeout(300)
+    await checkSafeZones(page, '1280×800', 3, 'after-reset')
+  })
+  
+  test('Count 4: After reset, no balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 4)
+    await page.evaluate(() => window.__tatematika!.resetGame())
+    await page.waitForTimeout(300)
+    await checkSafeZones(page, '1280×800', 4, 'after-reset')
+  })
+  
+  test('Count 5: After reset, no balloon overlaps', async ({ page }) => {
+    await setBalloonCount(page, 5)
+    await page.evaluate(() => window.__tatematika!.resetGame())
+    await page.waitForTimeout(300)
+    await checkSafeZones(page, '1280×800', 5, 'after-reset')
   })
 })
