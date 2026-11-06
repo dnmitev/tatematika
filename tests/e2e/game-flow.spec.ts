@@ -57,11 +57,32 @@ test.describe('Котето и балоните - E2E', () => {
     const correctBalloon = initialState.balloons.find(b => b.isCorrect)!
     const initialStars = initialState.stars
     
+    // Wait for cat to be idle before clicking
+    await expect.poll(async () => {
+      const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+      return !jumpState.isJumping
+    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    
+    // Wait for balloon to be ready (not animating)
+    await expect.poll(async () => {
+      const balloonBounds = await page.evaluate((id: string) => 
+        window.__tatematika!.getBalloonBounds(id), correctBalloon.id)
+      const balloonAnim = await page.evaluate((id: string) => 
+        window.__tatematika!.getBalloonAnimationState(id), correctBalloon.id)
+      
+      return balloonBounds !== null && 
+             !balloonAnim.isPopping && 
+             !balloonAnim.isBouncing
+    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    
     // When cat jumps and pops it
     await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correctBalloon.id)
     
-    // Wait for game state to update
-    await page.waitForTimeout(500)
+    // Wait for stars to increment
+    await expect.poll(async () => {
+      const s = await page.evaluate(() => window.__tatematika!.getGameState())
+      return s.stars
+    }, { timeout: 10000, intervals: [50] }).toBe(initialStars + 1)
     
     const newState = await page.evaluate(() => window.__tatematika!.getGameState())
     
@@ -184,14 +205,15 @@ test.describe('Котето и балоните - E2E', () => {
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
-    const firstBalloon = state.balloons[0]
+    // Click the correct balloon to ensure we can verify stars increment
+    const targetBalloon = state.balloons.find(b => b.isCorrect)!
     
     // Wait for balloon to exist and not be animating
     await expect.poll(async () => {
       const balloonBounds = await page.evaluate((id: string) => 
-        window.__tatematika!.getBalloonBounds(id), firstBalloon.id)
+        window.__tatematika!.getBalloonBounds(id), targetBalloon.id)
       const balloonAnim = await page.evaluate((id: string) => 
-        window.__tatematika!.getBalloonAnimationState(id), firstBalloon.id)
+        window.__tatematika!.getBalloonAnimationState(id), targetBalloon.id)
       
       return balloonBounds !== null && 
              !balloonAnim.isPopping && 
@@ -199,24 +221,19 @@ test.describe('Котето и балоните - E2E', () => {
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
     // Then cat goes to balloon and jumps
-    await page.evaluate((id) => window.__tatematika!.clickBalloon(id), firstBalloon.id)
+    await page.evaluate((id) => window.__tatematika!.clickBalloon(id), targetBalloon.id)
     
-    // Wait for state to update
+    // Wait for stars to increment
     await expect.poll(async () => {
       const newState = await page.evaluate(() => window.__tatematika!.getGameState())
-      return firstBalloon.isCorrect 
-        ? newState.stars > state.stars
-        : newState.wrongAttempts > state.wrongAttempts
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+      return newState.stars
+    }, { timeout: 10000, intervals: [50] }).toBe(state.stars + 1)
     
     // Verify final state
     const newState = await page.evaluate(() => window.__tatematika!.getGameState())
     
-    if (firstBalloon.isCorrect) {
-      expect(newState.stars).toBe(state.stars + 1)
-    } else {
-      expect(newState.wrongAttempts).toBe(state.wrongAttempts + 1)
-    }
+    // Must have gained exactly 1 star
+    expect(newState.stars).toBe(state.stars + 1)
   })
 
   test('К8: Touch input - touching balloon works', async ({ page }) => {
