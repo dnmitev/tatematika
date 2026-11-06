@@ -136,7 +136,6 @@ export class GameScene extends Phaser.Scene {
       fontStyle: 'bold'
     })
 
-    this.targetFontSize = 32
     this.targetText = this.add.text(75, this.scale.height - 75, '', {
       fontSize: `${this.targetFontSize}px`,
       color: '#000000',
@@ -470,20 +469,26 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number) {
-    if (!this.catIsJumping && this.pendingJumpBalloonId && Math.abs(this.catX - this.catTargetX) > 2) {
-      const distance = this.catTargetX - this.catX
-      const moveSpeed = Math.min(Math.abs(distance), 20)
-      
-      if (this.catX < this.catTargetX) {
-        this.catX += moveSpeed
-        if (this.catX > this.catTargetX) this.catX = this.catTargetX
+    if (!this.catIsJumping && this.pendingJumpBalloonId) {
+      if (Math.abs(this.catX - this.catTargetX) > 2) {
+        const distance = this.catTargetX - this.catX
+        const moveSpeed = Math.min(Math.abs(distance), 20)
+        
+        if (this.catX < this.catTargetX) {
+          this.catX += moveSpeed
+          if (this.catX > this.catTargetX) this.catX = this.catTargetX
+        } else {
+          this.catX -= moveSpeed
+          if (this.catX < this.catTargetX) this.catX = this.catTargetX
+        }
+        this.drawCat(this.cat, this.catX, this.catY)
+        
+        if (Math.abs(this.catX - this.catTargetX) <= 2) {
+          const balloonId = this.pendingJumpBalloonId
+          this.pendingJumpBalloonId = null
+          this.jumpToBalloon(balloonId)
+        }
       } else {
-        this.catX -= moveSpeed
-        if (this.catX < this.catTargetX) this.catX = this.catTargetX
-      }
-      this.drawCat(this.cat, this.catX, this.catY)
-      
-      if (Math.abs(this.catX - this.catTargetX) <= 2) {
         const balloonId = this.pendingJumpBalloonId
         this.pendingJumpBalloonId = null
         this.jumpToBalloon(balloonId)
