@@ -39,19 +39,63 @@ test.describe('Review Findings - Regression Tests', () => {
     // К8: "котето отива до избрания балон и скача"
     
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
-    // Use a WRONG balloon so it stays on screen after click
-    const targetBalloon = state.balloons.find(b => !b.isCorrect)!
+    const wrongBalloons = state.balloons.filter(b => !b.isCorrect)
     
-    // Get balloon bounds BEFORE click (so it doesn't disappear if correct)
-    const balloonGameBounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), targetBalloon.id)
+    // Get cat's starting position
+    let catStartPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
+    
+    // Pick the FARTHEST wrong balloon from cat's starting x (to exercise travel)
+    const balloonBoundsMap = new Map<string, any>()
+    for (const balloon of wrongBalloons) {
+      const bounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), balloon.id)
+      if (bounds) {
+        balloonBoundsMap.set(balloon.id, bounds)
+      }
+    }
+    
+    let targetBalloon = wrongBalloons[0]
+    let maxDistance = 0
+    for (const balloon of wrongBalloons) {
+      const bounds = balloonBoundsMap.get(balloon.id)
+      if (!bounds) continue
+      const centerX = bounds.x + bounds.width / 2
+      const distance = Math.abs(catStartPos.x - centerX)
+      if (distance > maxDistance) {
+        maxDistance = distance
+        targetBalloon = balloon
+      }
+    }
+    
+    // Get balloon bounds BEFORE click
+    const balloonGameBounds = balloonBoundsMap.get(targetBalloon.id)
     expect(balloonGameBounds).not.toBeNull()
+    
+    const balloonCenterX = balloonGameBounds!.x + balloonGameBounds!.width / 2
+    const balloonRadius = balloonGameBounds!.width / 2
+    
+    // Precondition: cat must start away from target balloon
+    // If cat is already under balloon, move it away
+    while (Math.abs(catStartPos.x - balloonCenterX) <= balloonRadius) {
+      // Move cat away with keyboard
+      const moveDirection = catStartPos.x < balloonCenterX ? 'ArrowLeft' : 'ArrowRight'
+      await page.keyboard.press(moveDirection)
+      await page.waitForTimeout(200)
+      catStartPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
+    }
+    
+    // Assert precondition
+    const startDistance = Math.abs(catStartPos.x - balloonCenterX)
+    expect(startDistance, 'precondition: cat must start away from target balloon').toBeGreaterThan(balloonRadius)
+    
+    // Get resting Y before click
+    const initialJumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+    const restingY = initialJumpState.restingY
     
     // Get balloon position in CSS pixels for clicking
     const balloonCssBounds = await page.evaluate((id) => {
       const bounds = window.__tatematika!.getBalloonBounds(id)
       if (!bounds) return null
       
-      // Convert to CSS pixels
       const canvas = document.querySelector('canvas')!
       const rect = canvas.getBoundingClientRect()
       const scale = rect.width / 800
@@ -66,32 +110,61 @@ test.describe('Review Findings - Regression Tests', () => {
     
     expect(balloonCssBounds).not.toBeNull()
     
-    // Get initial cat position and jump state
-    const initialCatPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
-    const initialJumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    
     // Click balloon center using real mouse click
     await page.mouse.click(
       balloonCssBounds!.x + balloonCssBounds!.width / 2, 
       balloonCssBounds!.y + balloonCssBounds!.height / 2
     )
     
-    // Wait for movement and jump animation
-    await page.waitForTimeout(800)
+    // Sample cat position and jump state over time to verify sequence: arrive, then jump
+    const samples = await page.evaluate(async ({ balloonCenterX, balloonRadius, restingY }) => {
+      const samples: Array<{ t: number; catX: number; catY: number; isJumping: boolean }> = []
+      const startTime = Date.now()
+      const maxDuration = 3000 // 3 seconds
+      
+      return new Promise<typeof samples>((resolve) => {
+        const interval = setInterval(() => {
+          const elapsed = Date.now() - startTime
+          
+          if (elapsed > maxDuration) {
+            clearInterval(interval)
+            resolve(samples)
+            return
+          }
+          
+          const catPos = window.__tatematika!.getCatPosition()
+          const jumpState = window.__tatematika!.getCatJumpState()
+          
+          samples.push({
+            t: elapsed,
+            catX: catPos.x,
+            catY: catPos.y,
+            isJumping: jumpState.isJumping || catPos.y < restingY
+          })
+        }, 50) // Poll every 50ms
+      })
+    }, { balloonCenterX, balloonRadius, restingY })
     
-    // Cat should have moved to under the balloon CENTER (within balloon radius)
-    const finalCatPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
+    // Find when cat arrived at balloon (within radius)
+    const arrivedIndex = samples.findIndex(s => 
+      Math.abs(s.catX - balloonCenterX) <= balloonRadius
+    )
     
-    // Compare cat x to balloon center (bounds.x is top-left)
-    const balloonCenterX = balloonGameBounds!.x + balloonGameBounds!.width / 2
-    const horizontalDistance = Math.abs(finalCatPos.x - balloonCenterX)
-    expect(horizontalDistance).toBeLessThanOrEqual(balloonGameBounds!.width / 2) // Within balloon radius
+    expect(arrivedIndex, 'cat never reached balloon').toBeGreaterThanOrEqual(0)
     
-    // Cat should have jumped
-    const finalJumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    // Check that cat jumped (either still jumping or moved above resting y)
-    const catMovedUp = finalCatPos.y < initialJumpState.restingY
-    expect(finalJumpState.isJumping || catMovedUp).toBe(true)
+    // Verify real movement: require at least one sample before arrival that is away from balloon
+    const hadSampleAwayBeforeArrival = samples.slice(0, arrivedIndex).some(s =>
+      Math.abs(s.catX - balloonCenterX) > balloonRadius
+    )
+    
+    expect(hadSampleAwayBeforeArrival, 'cat did not travel to balloon (no away sample before arrival)').toBe(true)
+    
+    // Find if cat jumped after arrival (while still at balloon)
+    const jumpedAfterArrival = samples.slice(arrivedIndex).some(s => 
+      s.isJumping && Math.abs(s.catX - balloonCenterX) <= balloonRadius
+    )
+    
+    expect(jumpedAfterArrival, 'cat reached balloon but did not jump there').toBe(true)
   })
 })
 
@@ -107,13 +180,57 @@ test.describe('Review Findings - Touch Input', () => {
     // Spec §3: "Докосване на балон: котето отива под него и скача"
     
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
-    // Use a WRONG balloon so it stays on screen
     const wrongBalloons = state.balloons.filter(b => !b.isCorrect)
-    const targetBalloon = wrongBalloons[wrongBalloons.length > 1 ? 1 : 0]
+    
+    // Get cat's starting position
+    let catStartPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
+    
+    // Pick the FARTHEST wrong balloon from cat's starting x (to exercise travel)
+    const balloonBoundsMap = new Map<string, any>()
+    for (const balloon of wrongBalloons) {
+      const bounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), balloon.id)
+      if (bounds) {
+        balloonBoundsMap.set(balloon.id, bounds)
+      }
+    }
+    
+    let targetBalloon = wrongBalloons[0]
+    let maxDistance = 0
+    for (const balloon of wrongBalloons) {
+      const bounds = balloonBoundsMap.get(balloon.id)
+      if (!bounds) continue
+      const centerX = bounds.x + bounds.width / 2
+      const distance = Math.abs(catStartPos.x - centerX)
+      if (distance > maxDistance) {
+        maxDistance = distance
+        targetBalloon = balloon
+      }
+    }
     
     // Get balloon bounds BEFORE tap
-    const balloonGameBounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), targetBalloon.id)
+    const balloonGameBounds = balloonBoundsMap.get(targetBalloon.id)
     expect(balloonGameBounds).not.toBeNull()
+    
+    const balloonCenterX = balloonGameBounds!.x + balloonGameBounds!.width / 2
+    const balloonRadius = balloonGameBounds!.width / 2
+    
+    // Precondition: cat must start away from target balloon
+    // If cat is already under balloon, move it away
+    while (Math.abs(catStartPos.x - balloonCenterX) <= balloonRadius) {
+      // Move cat away with keyboard
+      const moveDirection = catStartPos.x < balloonCenterX ? 'ArrowLeft' : 'ArrowRight'
+      await page.keyboard.press(moveDirection)
+      await page.waitForTimeout(200)
+      catStartPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
+    }
+    
+    // Assert precondition
+    const startDistance = Math.abs(catStartPos.x - balloonCenterX)
+    expect(startDistance, 'precondition: cat must start away from target balloon').toBeGreaterThan(balloonRadius)
+    
+    // Get resting Y before tap
+    const initialJumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+    const restingY = initialJumpState.restingY
     
     const balloonCssBounds = await page.evaluate((id) => {
       const bounds = window.__tatematika!.getBalloonBounds(id)
@@ -133,28 +250,61 @@ test.describe('Review Findings - Touch Input', () => {
     
     expect(balloonCssBounds).not.toBeNull()
     
-    const initialCatPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
-    const initialJumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    
     // Tap balloon center using touchscreen
     await page.touchscreen.tap(
       balloonCssBounds!.x + balloonCssBounds!.width / 2, 
       balloonCssBounds!.y + balloonCssBounds!.height / 2
     )
     
-    await page.waitForTimeout(800)
+    // Sample cat position and jump state over time to verify sequence: arrive, then jump
+    const samples = await page.evaluate(async ({ balloonCenterX, balloonRadius, restingY }) => {
+      const samples: Array<{ t: number; catX: number; catY: number; isJumping: boolean }> = []
+      const startTime = Date.now()
+      const maxDuration = 3000 // 3 seconds
+      
+      return new Promise<typeof samples>((resolve) => {
+        const interval = setInterval(() => {
+          const elapsed = Date.now() - startTime
+          
+          if (elapsed > maxDuration) {
+            clearInterval(interval)
+            resolve(samples)
+            return
+          }
+          
+          const catPos = window.__tatematika!.getCatPosition()
+          const jumpState = window.__tatematika!.getCatJumpState()
+          
+          samples.push({
+            t: elapsed,
+            catX: catPos.x,
+            catY: catPos.y,
+            isJumping: jumpState.isJumping || catPos.y < restingY
+          })
+        }, 50) // Poll every 50ms
+      })
+    }, { balloonCenterX, balloonRadius, restingY })
     
-    const finalCatPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
+    // Find when cat arrived at balloon (within radius)
+    const arrivedIndex = samples.findIndex(s => 
+      Math.abs(s.catX - balloonCenterX) <= balloonRadius
+    )
     
-    // Compare cat x to balloon center
-    const balloonCenterX = balloonGameBounds!.x + balloonGameBounds!.width / 2
-    const horizontalDistance = Math.abs(finalCatPos.x - balloonCenterX)
-    expect(horizontalDistance).toBeLessThanOrEqual(balloonGameBounds!.width / 2)
+    expect(arrivedIndex, 'cat never reached balloon').toBeGreaterThanOrEqual(0)
     
-    // Cat should have jumped
-    const finalJumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    const catMovedUp = finalCatPos.y < initialJumpState.restingY
-    expect(finalJumpState.isJumping || catMovedUp).toBe(true)
+    // Verify real movement: require at least one sample before arrival that is away from balloon
+    const hadSampleAwayBeforeArrival = samples.slice(0, arrivedIndex).some(s =>
+      Math.abs(s.catX - balloonCenterX) > balloonRadius
+    )
+    
+    expect(hadSampleAwayBeforeArrival, 'cat did not travel to balloon (no away sample before arrival)').toBe(true)
+    
+    // Find if cat jumped after arrival (while still at balloon)
+    const jumpedAfterArrival = samples.slice(arrivedIndex).some(s => 
+      s.isJumping && Math.abs(s.catX - balloonCenterX) <= balloonRadius
+    )
+    
+    expect(jumpedAfterArrival, 'cat reached balloon but did not jump there').toBe(true)
   })
 })
 
@@ -183,20 +333,90 @@ test.describe('Review Findings - Keyboard Input', () => {
     const afterLeftPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
     expect(afterLeftPos.x).toBeLessThan(afterMovePos.x)
     
-    // Press space to jump
-    await page.keyboard.press('Space')
-    await page.waitForTimeout(200)
+    // Press space to jump - poll to verify jump happens
+    const initialJumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+    const restingY = initialJumpState.restingY
     
-    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    expect(jumpState.isJumping).toBe(true)
+    await page.keyboard.press('Space')
+    
+    // Poll for up to 1000ms to detect jump
+    const spaceJumped = await page.evaluate(async ({ restingY }) => {
+      const startTime = Date.now()
+      return new Promise<boolean>((resolve) => {
+        const interval = setInterval(() => {
+          const elapsed = Date.now() - startTime
+          
+          if (elapsed > 1000) {
+            clearInterval(interval)
+            resolve(false)
+            return
+          }
+          
+          const catPos = window.__tatematika!.getCatPosition()
+          const jumpState = window.__tatematika!.getCatJumpState()
+          
+          if (jumpState.isJumping || catPos.y < restingY) {
+            clearInterval(interval)
+            resolve(true)
+          }
+        }, 50)
+      })
+    }, { restingY })
+    
+    expect(spaceJumped, 'Space key did not trigger jump').toBe(true)
     
     // Test ArrowUp also works for jump
-    await page.waitForTimeout(500) // Wait for jump to finish
-    await page.keyboard.press('ArrowUp')
-    await page.waitForTimeout(200)
+    // First wait for previous jump to end
+    await page.evaluate(async () => {
+      const startTime = Date.now()
+      return new Promise<void>((resolve) => {
+        const interval = setInterval(() => {
+          const elapsed = Date.now() - startTime
+          
+          if (elapsed > 2000) {
+            clearInterval(interval)
+            resolve()
+            return
+          }
+          
+          const jumpState = window.__tatematika!.getCatJumpState()
+          
+          if (!jumpState.isJumping) {
+            clearInterval(interval)
+            resolve()
+          }
+        }, 50)
+      })
+    })
     
-    const jumpState2 = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    expect(jumpState2.isJumping).toBe(true)
+    // Now press ArrowUp
+    await page.keyboard.press('ArrowUp')
+    
+    // Poll for up to 1000ms to detect jump
+    const arrowUpJumped = await page.evaluate(async ({ restingY }) => {
+      const startTime = Date.now()
+      return new Promise<boolean>((resolve) => {
+        const interval = setInterval(() => {
+          const elapsed = Date.now() - startTime
+          
+          if (elapsed > 1000) {
+            clearInterval(interval)
+            resolve(false)
+            return
+          }
+          
+          const catPos = window.__tatematika!.getCatPosition()
+          const jumpState = window.__tatematika!.getCatJumpState()
+          
+          if (jumpState.isJumping || catPos.y < restingY) {
+            clearInterval(interval)
+            resolve(true)
+          }
+        }, 50)
+      })
+    }, { restingY })
+    
+    expect(arrowUpJumped, 'ArrowUp key did not trigger jump').toBe(true)
   })
 })
 
