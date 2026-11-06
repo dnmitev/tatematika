@@ -5,6 +5,39 @@ import { test, expect } from '@playwright/test'
  * These tests verify spec requirements that were not met in the initial implementation
  */
 
+/**
+ * Helper: Wait for game to be ready, pop correct balloon, wait for star increment
+ * Ensures the cat is not jumping and the balloon is not animating before clicking
+ */
+async function popCorrectBalloonAndWait(page: any) {
+  const state = await page.evaluate(() => window.__tatematika!.getGameState())
+  const prevStars = state.stars
+  const correct = state.balloons.find((b: any) => b.isCorrect)!
+  
+  // Wait for game to be ready: cat not jumping, balloon exists and not animating
+  await expect.poll(async () => {
+    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+    const balloonBounds = await page.evaluate((id: string) => 
+      window.__tatematika!.getBalloonBounds(id), correct.id)
+    const balloonAnim = await page.evaluate((id: string) => 
+      window.__tatematika!.getBalloonAnimationState(id), correct.id)
+    
+    return !jumpState.isJumping && 
+           balloonBounds !== null && 
+           !balloonAnim.isPopping && 
+           !balloonAnim.isBouncing
+  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  
+  // Click the balloon
+  await page.evaluate((id: string) => window.__tatematika!.clickBalloon(id), correct.id)
+  
+  // Wait for star to increment
+  await expect.poll(async () => {
+    const s = await page.evaluate(() => window.__tatematika!.getGameState())
+    return s.stars
+  }, { timeout: 10000, intervals: [50] }).toBe(prevStars + 1)
+}
+
 test.describe('Review Findings - Regression Tests', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
@@ -480,19 +513,9 @@ test.describe('Review Findings - Other Tests', () => {
     }
     
     // Pop a correct balloon and verify sound plays (count increases)
-    let state = await page.evaluate(() => window.__tatematika!.getGameState())
-    let prevStars = state.stars
-    const correctBalloon = state.balloons.find(b => b.isCorrect)!
-    
     const countBefore = await page.evaluate(() => window.__tatematika!.getSoundPlayCount())
     
-    await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correctBalloon.id)
-    
-    // Wait for star to increment
-    await expect.poll(async () => {
-      const s = await page.evaluate(() => window.__tatematika!.getGameState())
-      return s.stars
-    }, { timeout: 5000, intervals: [50] }).toBe(prevStars + 1)
+    await popCorrectBalloonAndWait(page)
     
     const countAfterFirstPop = await page.evaluate(() => window.__tatematika!.getSoundPlayCount())
     const lastSound = await page.evaluate(() => window.__tatematika!.getLastPlayedSound())
@@ -502,7 +525,7 @@ test.describe('Review Findings - Other Tests', () => {
     expect(['pop', 'пук', 'correct']).toContain(lastSound)
     
     // Wait for new round (target or balloon ids change)
-    state = await page.evaluate(() => window.__tatematika!.getGameState())
+    let state = await page.evaluate(() => window.__tatematika!.getGameState())
     const prevTarget = state.target
     const prevBalloonIds = state.balloons.map(b => b.id)
     await expect.poll(async () => {
@@ -519,19 +542,9 @@ test.describe('Review Findings - Other Tests', () => {
     expect(isMuted).toBe(true)
     
     // Pop another correct balloon while muted
-    state = await page.evaluate(() => window.__tatematika!.getGameState())
-    prevStars = state.stars
-    const nextCorrect = state.balloons.find(b => b.isCorrect)!
-    
     const countBeforeMuted = await page.evaluate(() => window.__tatematika!.getSoundPlayCount())
     
-    await page.evaluate((id) => window.__tatematika!.clickBalloon(id), nextCorrect.id)
-    
-    // Wait for star to increment
-    await expect.poll(async () => {
-      const s = await page.evaluate(() => window.__tatematika!.getGameState())
-      return s.stars
-    }, { timeout: 5000, intervals: [50] }).toBe(prevStars + 1)
+    await popCorrectBalloonAndWait(page)
     
     // Give effects 300ms to settle
     await page.waitForTimeout(300)
@@ -556,19 +569,9 @@ test.describe('Review Findings - Other Tests', () => {
     // Unmute and verify sound works again (count increases)
     await page.evaluate(() => window.__tatematika!.toggleMute())
     
-    state = await page.evaluate(() => window.__tatematika!.getGameState())
-    prevStars = state.stars
-    const thirdCorrect = state.balloons.find(b => b.isCorrect)!
-    
     const countBeforeUnmuted = await page.evaluate(() => window.__tatematika!.getSoundPlayCount())
     
-    await page.evaluate((id) => window.__tatematika!.clickBalloon(id), thirdCorrect.id)
-    
-    // Wait for star to increment
-    await expect.poll(async () => {
-      const s = await page.evaluate(() => window.__tatematika!.getGameState())
-      return s.stars
-    }, { timeout: 5000, intervals: [50] }).toBe(prevStars + 1)
+    await popCorrectBalloonAndWait(page)
     
     const countAfterUnmuted = await page.evaluate(() => window.__tatematika!.getSoundPlayCount())
     
@@ -596,22 +599,14 @@ test.describe('Review Findings - Other Tests', () => {
     
     // Pop 5 correct balloons to complete the level
     for (let i = 0; i < 5; i++) {
-      let state = await page.evaluate(() => window.__tatematika!.getGameState())
-      const prevStars = state.stars
-      const prevTarget = state.target
-      const prevBalloonIds = state.balloons.map(b => b.id)
-      const correct = state.balloons.find(b => b.isCorrect)!
-      
-      await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correct.id)
-      
-      // Wait for star to increment
-      await expect.poll(async () => {
-        const s = await page.evaluate(() => window.__tatematika!.getGameState())
-        return s.stars
-      }, { timeout: 10000, intervals: [50] }).toBe(prevStars + 1)
+      await popCorrectBalloonAndWait(page)
       
       // If not the last pop, wait for new round
       if (i < 4) {
+        const state = await page.evaluate(() => window.__tatematika!.getGameState())
+        const prevTarget = state.target
+        const prevBalloonIds = state.balloons.map(b => b.id)
+        
         await expect.poll(async () => {
           const s = await page.evaluate(() => window.__tatematika!.getGameState())
           const hasNewTarget = s.target !== prevTarget
@@ -619,9 +614,6 @@ test.describe('Review Findings - Other Tests', () => {
           const hasCorrectBalloon = s.balloons.some(b => b.isCorrect)
           return (hasNewTarget || hasNewBalloons) && hasCorrectBalloon
         }, { timeout: 10000, intervals: [50] }).toBe(true)
-        
-        // Give a moment for the round to fully stabilize
-        await page.waitForTimeout(100)
       }
     }
     
@@ -655,22 +647,14 @@ test.describe('Review Findings - Other Tests', () => {
     
     // Complete level 1 (5 stars)
     for (let i = 0; i < 5; i++) {
-      let state = await page.evaluate(() => window.__tatematika!.getGameState())
-      const prevStars = state.stars
-      const prevTarget = state.target
-      const prevBalloonIds = state.balloons.map(b => b.id)
-      const correct = state.balloons.find(b => b.isCorrect)!
-      
-      await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correct.id)
-      
-      // Wait for star to increment
-      await expect.poll(async () => {
-        const s = await page.evaluate(() => window.__tatematika!.getGameState())
-        return s.stars
-      }, { timeout: 10000, intervals: [50] }).toBe(prevStars + 1)
+      await popCorrectBalloonAndWait(page)
       
       // If not the last pop, wait for new round
       if (i < 4) {
+        const state = await page.evaluate(() => window.__tatematika!.getGameState())
+        const prevTarget = state.target
+        const prevBalloonIds = state.balloons.map(b => b.id)
+        
         await expect.poll(async () => {
           const s = await page.evaluate(() => window.__tatematika!.getGameState())
           const hasNewTarget = s.target !== prevTarget
@@ -678,9 +662,6 @@ test.describe('Review Findings - Other Tests', () => {
           const hasCorrectBalloon = s.balloons.some(b => b.isCorrect)
           return (hasNewTarget || hasNewBalloons) && hasCorrectBalloon
         }, { timeout: 10000, intervals: [50] }).toBe(true)
-        
-        // Give a moment for the round to fully stabilize
-        await page.waitForTimeout(100)
       }
     }
     
@@ -699,13 +680,6 @@ test.describe('Review Findings - Other Tests', () => {
     expect(stateAfter.target).toBeGreaterThanOrEqual(0)
     
     // Pop a balloon and verify stars increment to 1
-    const correct = stateAfter.balloons.find(b => b.isCorrect)!
-    await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correct.id)
-    
-    // Poll for stars === 1
-    await expect.poll(async () => {
-      const s = await page.evaluate(() => window.__tatematika!.getGameState())
-      return s.stars
-    }, { timeout: 5000, intervals: [50] }).toBe(1)
+    await popCorrectBalloonAndWait(page)
   })
 })
