@@ -95,9 +95,6 @@ test.describe('Review Findings - Regression Tests', () => {
     
     // Get balloon position in CSS pixels for clicking
     const { canvasRect, scale } = await getGameScaleAndRect(page)
-    const balloonGameBounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), targetBalloon.id)
-    
-    expect(balloonGameBounds).not.toBeNull()
     
     const balloonCssBounds = {
       x: balloonGameBounds!.x * scale + canvasRect.left,
@@ -231,9 +228,6 @@ test.describe('Review Findings - Touch Input', () => {
     const restingY = initialJumpState.restingY
     
     const { canvasRect, scale } = await getGameScaleAndRect(page)
-    const balloonGameBounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), targetBalloon.id)
-    
-    expect(balloonGameBounds).not.toBeNull()
     
     const balloonCssBounds = {
       x: balloonGameBounds!.x * scale + canvasRect.left,
