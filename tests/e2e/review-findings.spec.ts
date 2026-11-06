@@ -6,8 +6,8 @@ import { test, expect } from '@playwright/test'
  */
 
 /**
- * Helper: Wait for game to be ready, pop correct balloon, wait for star increment
- * Ensures the cat is not jumping and the balloon is not animating before clicking
+ * Helper: Wait for game to be ready, pop correct balloon, wait for new round
+ * Ensures observable, spec-backed readiness without assuming IDs or target change
  */
 async function popCorrectBalloonAndWait(page: any) {
   const state = await page.evaluate(() => window.__tatematika!.getGameState())
@@ -36,6 +36,31 @@ async function popCorrectBalloonAndWait(page: any) {
     const s = await page.evaluate(() => window.__tatematika!.getGameState())
     return s.stars
   }, { timeout: 10000, intervals: [50] }).toBe(prevStars + 1)
+  
+  // Wait for new round to be ready with observable facts per spec:
+  // - Cat is idle (not jumping)
+  // - Exactly one isCorrect balloon present
+  // - The correct balloon's formula evaluates to the current target
+  await expect.poll(async () => {
+    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+    if (jumpState.isJumping) return false
+    
+    const s = await page.evaluate(() => window.__tatematika!.getGameState())
+    const correctBalloons = s.balloons.filter((b: any) => b.isCorrect)
+    if (correctBalloons.length !== 1) return false
+    
+    // Verify the correct balloon's formula actually equals the target
+    const correct = correctBalloons[0]
+    const formulaMatch = correct.formula.match(/(\d+)\s*([+−-])\s*(\d+)/)
+    if (!formulaMatch) return false
+    
+    const a = parseInt(formulaMatch[1])
+    const op = formulaMatch[2]
+    const b = parseInt(formulaMatch[3])
+    const result = op === '+' ? a + b : a - b
+    
+    return result === s.target
+  }, { timeout: 10000, intervals: [50] }).toBe(true)
 }
 
 test.describe('Review Findings - Regression Tests', () => {
@@ -524,18 +549,6 @@ test.describe('Review Findings - Other Tests', () => {
     expect(lastSound).toBeTruthy()
     expect(['pop', 'пук', 'correct']).toContain(lastSound)
     
-    // Wait for new round (target or balloon ids change)
-    let state = await page.evaluate(() => window.__tatematika!.getGameState())
-    const prevTarget = state.target
-    const prevBalloonIds = state.balloons.map(b => b.id)
-    await expect.poll(async () => {
-      const s = await page.evaluate(() => window.__tatematika!.getGameState())
-      const hasNewTarget = s.target !== prevTarget
-      const hasNewBalloons = !s.balloons.every((b, i) => b.id === prevBalloonIds[i])
-      const hasCorrectBalloon = s.balloons.some(b => b.isCorrect)
-      return (hasNewTarget || hasNewBalloons) && hasCorrectBalloon
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
-    
     // Now mute
     await page.evaluate(() => window.__tatematika!.toggleMute())
     const isMuted = await page.evaluate(() => window.__tatematika!.isMuted())
@@ -553,18 +566,6 @@ test.describe('Review Findings - Other Tests', () => {
     
     // When muted, count must NOT increase
     expect(countAfterMuted).toBe(countBeforeMuted)
-    
-    // Wait for new round
-    state = await page.evaluate(() => window.__tatematika!.getGameState())
-    const prevTarget2 = state.target
-    const prevBalloonIds2 = state.balloons.map(b => b.id)
-    await expect.poll(async () => {
-      const s = await page.evaluate(() => window.__tatematika!.getGameState())
-      const hasNewTarget = s.target !== prevTarget2
-      const hasNewBalloons = !s.balloons.every((b, i) => b.id === prevBalloonIds2[i])
-      const hasCorrectBalloon = s.balloons.some(b => b.isCorrect)
-      return (hasNewTarget || hasNewBalloons) && hasCorrectBalloon
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
     
     // Unmute and verify sound works again (count increases)
     await page.evaluate(() => window.__tatematika!.toggleMute())
@@ -600,21 +601,6 @@ test.describe('Review Findings - Other Tests', () => {
     // Pop 5 correct balloons to complete the level
     for (let i = 0; i < 5; i++) {
       await popCorrectBalloonAndWait(page)
-      
-      // If not the last pop, wait for new round
-      if (i < 4) {
-        const state = await page.evaluate(() => window.__tatematika!.getGameState())
-        const prevTarget = state.target
-        const prevBalloonIds = state.balloons.map(b => b.id)
-        
-        await expect.poll(async () => {
-          const s = await page.evaluate(() => window.__tatematika!.getGameState())
-          const hasNewTarget = s.target !== prevTarget
-          const hasNewBalloons = !s.balloons.every((b, idx) => b.id === prevBalloonIds[idx])
-          const hasCorrectBalloon = s.balloons.some(b => b.isCorrect)
-          return (hasNewTarget || hasNewBalloons) && hasCorrectBalloon
-        }, { timeout: 10000, intervals: [50] }).toBe(true)
-      }
     }
     
     // Poll until getLevelEndText contains 'Ти успя'
@@ -648,21 +634,6 @@ test.describe('Review Findings - Other Tests', () => {
     // Complete level 1 (5 stars)
     for (let i = 0; i < 5; i++) {
       await popCorrectBalloonAndWait(page)
-      
-      // If not the last pop, wait for new round
-      if (i < 4) {
-        const state = await page.evaluate(() => window.__tatematika!.getGameState())
-        const prevTarget = state.target
-        const prevBalloonIds = state.balloons.map(b => b.id)
-        
-        await expect.poll(async () => {
-          const s = await page.evaluate(() => window.__tatematika!.getGameState())
-          const hasNewTarget = s.target !== prevTarget
-          const hasNewBalloons = !s.balloons.every((b, idx) => b.id === prevBalloonIds[idx])
-          const hasCorrectBalloon = s.balloons.some(b => b.isCorrect)
-          return (hasNewTarget || hasNewBalloons) && hasCorrectBalloon
-        }, { timeout: 10000, intervals: [50] }).toBe(true)
-      }
     }
     
     // Wait for button to be visible
