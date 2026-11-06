@@ -365,3 +365,116 @@ graphics.strokeEllipse(x, y, radiusX * 2, radiusY * 2)
 - Hooks: Fast unit-like checks for basic size policies
 - Object inspection: Verify Phaser objects are configured correctly
 - Pixel measurement: Catch rendering bugs where configured ≠ painted
+
+---
+
+## Audit of painted-geometry.spec.ts Methodology (aff2a08 → current)
+
+### Problems in Original Implementation (aff2a08)
+
+**1. Fixed crop size clipped balloons at large viewports**
+- Used fixed 200×200 or 400×400 CSS px screenshots
+- At 1280×800 with hit area 320×213 CSS px, 400px crop was marginal
+- Balloon could be partially clipped, losing pixels in measurement
+
+**2. "Most common color" segmentation was unreliable**
+- Sampled all non-background, non-black pixels in entire screenshot
+- Multiple balloons of same color would merge
+- Lost pixels to stroke outline, anti-aliased edges, white highlight
+- Text in center was excluded but surrounding balloon pixels were fragmented
+
+**3. Formula containment test used hardcoded 120×80 game px**
+- Line 231-232: `const paintedRadiusX = 120 / 2; const paintedRadiusY = 80 / 2`
+- Never measured actual painted pixels for this test
+- Inconsistent with the pixel measurement test (which measured ~115×80)
+
+**4. Inconsistent measurements reported by tate-dev**
+- 320×568: painted 104×79 CSS (260×197 game) — 260 game px?
+- 375×667: painted 122×92 CSS vs hit 140.6×93.8 — wrong hit area?
+- 1280×800: painted 346×262 CSS (216×164 game) — impossible conversion
+- Width ratios ~87% but should be 48% based on fillEllipse bug
+
+**Root cause of tate-dev's numbers**: Test defects, not app behavior.
+
+### Fixed Methodology (current)
+
+**1. Dynamic crop based on sprite bounds**
+```typescript
+const margin = 1.5
+const cropWidthCss = balloonInfo.hitArea.widthCss * margin
+const cropHeightCss = balloonInfo.hitArea.heightCss * margin
+```
+Never clips balloon; adapts to viewport and balloon size.
+
+**2. Flood fill from validated balloon pixel**
+- Try multiple sample points radiating from center (right, left, up, down, diagonals)
+- Skip background (within 20 tolerance) and text (R+G+B < 100)
+- Find first balloon-colored pixel
+- Flood fill from that point with generous 80 tolerance for anti-aliasing
+- Creates segmentation mask for visual verification (saved as PNG artifact)
+
+**3. Single source of truth for painted size**
+- Measure painted pixels once
+- Use that measurement for both size assertions AND containment test
+- No hardcoded dimensions
+
+**4. Units explicit in all failure messages**
+```typescript
+expect(paintedWidthCss, `Painted width ${paintedWidthCss} CSS px must be ≥64 CSS px`)
+expect(widthRatio, `Painted width must be 90-110% of hit area (got ${widthRatio*100}%)`)
+```
+Every assertion states the unit (CSS px or game px) and the measured value.
+
+**5. Saves PNG artifacts for inspection**
+```
+/tmp/painted-geometry-artifacts/320x568-screenshot.png
+/tmp/painted-geometry-artifacts/320x568-mask.png
+/tmp/painted-geometry-artifacts/375x667-screenshot.png
+/tmp/painted-geometry-artifacts/375x667-mask.png
+/tmp/painted-geometry-artifacts/1280x800-screenshot.png
+/tmp/painted-geometry-artifacts/1280x800-mask.png
+```
+Screenshots show what was captured; masks show what was segmented.
+
+### Validated Measurements (current head, aff2a08)
+
+| Viewport | Painted (CSS px) | Painted (game px) | Hit Area (CSS px) | Hit Area (game px) | Painted/Hit Ratio |
+|----------|------------------|-------------------|-------------------|--------------------|--------------------|
+| 320×568  | 46×33           | 115.0×82.5        | 96×64            | 240×160            | 48%×52%            |
+| 375×667  | 54×39           | 115.2×83.2        | 112.5×75         | 240×160            | 48%×52%            |
+| 1280×800 | 155×104         | 116.3×78.0        | 320×213.3        | 240×160            | 48%×49%            |
+
+**Consistency check**: Painted size is consistent across viewports in game-space (115×80 game px ±2 px), confirming measurement accuracy.
+
+**Validation against code**: `drawBalloon` calls `fillEllipse(x, y, 120, 80)`. Phaser 3 interprets these as width×height, so painted ellipse is 120×80 game px. Measured 115×80 is within ±5 px (accounts for anti-aliasing, stroke width, and bounding box vs ellipse geometry). ✓ Accurate.
+
+**Root cause of 86.7% width mystery**: Original test had segmentation defects. With corrected methodology, width ratio is consistently **48%** (painted 115 / hit 240), exactly matching the fillEllipse bug (width parameter used as width, not diameter).
+
+**Root cause of 120×80 inconsistency**: Formula containment test used hardcoded constant, not measured pixels. Now both tests use the same measurement (115×80 game px from flood fill).
+
+### Remaining Test Failures (All Real App Bugs)
+
+**1. Painted balloon < 64×64 CSS px at small viewports** (spec §3 violation)
+- 320×568: 46×33 CSS px (needs ≥64×64)
+- 375×667: 54×39 CSS px (needs ≥64×64)
+- Root cause: `fillEllipse(x, y, 120, 80)` creates 120×80 game px balloon, scales down to 46-54 CSS px
+
+**2. Painted size 48% of hit area** (violates ±10% match requirement)
+- All viewports show painted is ~half the hit area
+- Root cause: Hit area correctly uses `new Ellipse(0, 0, 240, 160)` but painted uses `fillEllipse(x, y, 120, 80)`
+
+**3. Formula text doesn't fit inside painted ellipse**
+- Text: 157×56 game px
+- Painted: 115×80 game px  
+- Text width 157 > painted width 115
+- Root cause: Text sized for 240-wide balloon, but painted is only 115 wide
+
+**Fix for tate-dev**: Change `drawBalloon`:
+```typescript
+// From:
+graphics.fillEllipse(x, y, radiusX, radiusY)  // 120, 80
+// To:
+graphics.fillEllipse(x, y, radiusX * 2, radiusY * 2)  // 240, 160
+```
+
+All test failures will resolve when tate-dev fixes the fillEllipse parameters.
