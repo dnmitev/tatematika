@@ -66,11 +66,34 @@ All visual and audio assets are either:
 
 This ensures full compliance with the requirement to use only self-made or CC0 assets.
 
-## Future Enhancements
+## Sound Effects
 
-If sound effects are added in the future, they should be sourced from CC0 libraries such as:
-- Freesound.org (CC0 licensed sounds)
-- OpenGameArt.org (CC0 licensed sounds)
-- Or created specifically for this project
+All sound effects are generated programmatically using the Web Audio API. No external audio files are used.
 
-All such additions must be documented here with proper attribution.
+### Programmatically Generated Sounds
+
+**Pop Sound (Correct Balloon)**
+- **Source**: Web Audio API OscillatorNode
+- **License**: CC0 / Public Domain (generated code)
+- **Location**: `src/scenes/GameScene.ts`, method `playSound('pop')`
+- **Description**: 800Hz to 100Hz frequency sweep over 0.1s, exponential decay
+
+**Boing Sound (Wrong Balloon Bounce)**
+- **Source**: Web Audio API OscillatorNode
+- **License**: CC0 / Public Domain (generated code)
+- **Location**: `src/scenes/GameScene.ts`, method `playSound('boing')`
+- **Description**: 200Hz to 600Hz frequency sweep over 0.2s, spring-like bounce
+
+**Meow Sound (Wrong Attempt)**
+- **Source**: Web Audio API OscillatorNode
+- **License**: CC0 / Public Domain (generated code)
+- **Location**: `src/scenes/GameScene.ts`, method `playSound('meow')`
+- **Description**: 400Hz → 600Hz → 300Hz frequency modulation over 0.3s, cat-like vocalization
+
+**Level Complete Melody**
+- **Source**: Web Audio API OscillatorNode
+- **License**: CC0 / Public Domain (generated code)
+- **Location**: `src/scenes/GameScene.ts`, method `playSound('level-complete')`
+- **Description**: Four-note ascending melody (C, D, E, G) using frequencies 523.25Hz, 587.33Hz, 659.25Hz, 783.99Hz
+
+All sounds respect the mute button state and are only played when audio is enabled.

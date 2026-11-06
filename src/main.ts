@@ -48,19 +48,18 @@ declare global {
   }
 }
 
-// Phaser config with responsive scaling
+// Phaser config with responsive sizing
+// Use RESIZE mode to adapt canvas to viewport without shrinking content
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
-  width: 800,
-  height: 600,
+  width: Math.max(375, window.innerWidth),
+  height: Math.max(600, window.innerHeight),
   parent: 'game-container',
   scene: [GameScene, LevelCompleteScene],
   backgroundColor: '#87CEEB',
   scale: {
-    mode: Phaser.Scale.FIT,
-    autoCenter: Phaser.Scale.CENTER_BOTH,
-    width: 800,
-    height: 600
+    mode: Phaser.Scale.RESIZE,
+    autoCenter: Phaser.Scale.CENTER_BOTH
   }
 }
 
@@ -120,41 +119,83 @@ window.__tatematika = {
     return null
   },
   
-  // Regression test hooks - stubs
+  // Regression test hooks
   getLastPlayedSound() {
-    throw new Error('not implemented')
+    const gameScene = getGameScene()
+    if (!gameScene) {
+      return null
+    }
+    return gameScene.getLastPlayedSound()
   },
   getFormulaFontSize() {
-    throw new Error('not implemented')
+    const gameScene = getGameScene()
+    if (!gameScene) {
+      throw new Error('GameScene not active')
+    }
+    return gameScene.getFormulaFontSize()
   },
   getTargetFontSize() {
-    throw new Error('not implemented')
+    const gameScene = getGameScene()
+    if (!gameScene) {
+      throw new Error('GameScene not active')
+    }
+    return gameScene.getTargetFontSize()
   },
   getMuteButtonBounds() {
-    throw new Error('not implemented')
+    const gameScene = getGameScene()
+    if (!gameScene) {
+      throw new Error('GameScene not active')
+    }
+    return gameScene.getMuteButtonBounds()
   },
   getCatPosition() {
-    throw new Error('not implemented')
+    const gameScene = getGameScene()
+    if (!gameScene) {
+      throw new Error('GameScene not active')
+    }
+    return gameScene.getCatPosition()
   },
   getCatJumpState() {
-    throw new Error('not implemented')
+    const gameScene = getGameScene()
+    if (!gameScene) {
+      throw new Error('GameScene not active')
+    }
+    return gameScene.getCatJumpState()
   },
   getBalloonBounds(balloonId: string) {
-    throw new Error('not implemented')
+    const gameScene = getGameScene()
+    if (!gameScene) {
+      return null
+    }
+    return gameScene.getBalloonBounds(balloonId)
   },
   getBalloonAnimationState(balloonId: string) {
-    throw new Error('not implemented')
+    const gameScene = getGameScene()
+    if (!gameScene) {
+      return { isBouncing: false, isPopping: false }
+    }
+    return gameScene.getBalloonAnimationState(balloonId)
   },
   
-  // Settings UI hooks - stubs
+  // Settings UI hooks
   openSettings() {
-    throw new Error('not implemented')
+    const gameScene = getGameScene()
+    if (gameScene) {
+      gameScene.openSettings()
+    }
   },
   closeSettings() {
-    throw new Error('not implemented')
+    const gameScene = getGameScene()
+    if (gameScene) {
+      gameScene.closeSettings()
+    }
   },
   isSettingsOpen() {
-    throw new Error('not implemented')
+    const gameScene = getGameScene()
+    if (!gameScene) {
+      return false
+    }
+    return gameScene.isSettingsOpen()
   }
 }
 

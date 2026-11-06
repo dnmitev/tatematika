@@ -17,20 +17,23 @@ export class LevelCompleteScene extends Phaser.Scene {
   }
 
   create() {
-    this.add.rectangle(400, 300, 800, 600, 0xFFD700, 0.3)
+    const centerX = this.scale.width / 2
+    const centerY = this.scale.height / 2
+    
+    this.add.rectangle(centerX, centerY, this.scale.width, this.scale.height, 0xFFD700, 0.3)
 
-    this.add.text(400, 150, LEVEL_COMPLETE_TITLE, {
+    this.add.text(centerX, centerY - 150, LEVEL_COMPLETE_TITLE, {
       fontSize: '64px',
       color: '#FF1493',
       fontStyle: 'bold'
     }).setOrigin(0.5)
 
-    this.add.text(400, 250, LEVEL_COMPLETE_MESSAGE(this.stars), {
+    this.add.text(centerX, centerY - 50, LEVEL_COMPLETE_MESSAGE(this.stars), {
       fontSize: '36px',
       color: '#000000'
     }).setOrigin(0.5)
 
-    const playAgainButton = this.add.text(400, 350, BUTTON_PLAY_AGAIN, {
+    const playAgainButton = this.add.text(centerX, centerY + 50, BUTTON_PLAY_AGAIN, {
       fontSize: '32px',
       color: '#FFFFFF',
       backgroundColor: '#4CAF50',
@@ -40,8 +43,9 @@ export class LevelCompleteScene extends Phaser.Scene {
       .on('pointerdown', () => this.playAgain())
       .on('pointerover', () => playAgainButton.setScale(1.1))
       .on('pointerout', () => playAgainButton.setScale(1))
+      .setData('testid', 'button-play-again')
 
-    const menuButton = this.add.text(400, 450, BUTTON_TO_MENU, {
+    const menuButton = this.add.text(centerX, centerY + 150, BUTTON_TO_MENU, {
       fontSize: '32px',
       color: '#FFFFFF',
       backgroundColor: '#2196F3',
@@ -51,6 +55,7 @@ export class LevelCompleteScene extends Phaser.Scene {
       .on('pointerdown', () => this.toMenu())
       .on('pointerover', () => menuButton.setScale(1.1))
       .on('pointerout', () => menuButton.setScale(1))
+      .setData('testid', 'button-to-menu')
 
     for (let i = 0; i < 30; i++) {
       this.createConfetti()
@@ -77,8 +82,12 @@ export class LevelCompleteScene extends Phaser.Scene {
   }
 
   private playAgain() {
-    this.gameState = startNewLevel(this.gameState)
+    const newState = startNewLevel(this.gameState)
     this.scene.start('GameScene')
+    const gameScene = this.scene.get('GameScene') as any
+    if (gameScene && gameScene.setGameState) {
+      gameScene.setGameState(newState)
+    }
   }
 
   private toMenu() {

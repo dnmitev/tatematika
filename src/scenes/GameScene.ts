@@ -2,8 +2,8 @@ import Phaser from 'phaser'
 import type { GameState, Balloon } from '../game-logic/types'
 import { createInitialState, addStar, isLevelComplete, startNewLevel } from '../game-logic/scoring'
 import { checkBalloon, handleCorrectPop, handleWrongAttempt, shouldShowHint, resetBalloons } from '../game-logic/round'
-import { loadSettings } from '../game-logic/settings'
-import { getPraiseMessage, WRONG_ANSWER_MESSAGE } from '../game-logic/strings'
+import { loadSettings, saveSettings, updateSetting, DEFAULT_SETTINGS } from '../game-logic/settings'
+import { getPraiseMessage, WRONG_ANSWER_MESSAGE, LEVEL_COMPLETE_TITLE, LEVEL_COMPLETE_MESSAGE } from '../game-logic/strings'
 
 interface BalloonSprite {
   id: string
@@ -12,22 +12,39 @@ interface BalloonSprite {
   y: number
   x: number
   isCorrect: boolean
+  isBouncing: boolean
+  isPopping: boolean
+  bounceStartTime?: number
+  popStartTime?: number
 }
 
 export class GameScene extends Phaser.Scene {
   private gameState!: GameState
   private cat!: Phaser.GameObjects.Graphics
   private catX: number = 400
+  private catY: number = 460
+  private catTargetX: number = 400
+  private catIsJumping: boolean = false
+  private catJumpStartY: number = 460
+  private catJumpTime: number = 0
   private balloonSprites: BalloonSprite[] = []
   private targetText!: Phaser.GameObjects.Text
   private starsText!: Phaser.GameObjects.Text
   private wrongAttemptsText!: Phaser.GameObjects.Text
   private feedbackText!: Phaser.GameObjects.Text
   private muteButton!: Phaser.GameObjects.Text
+  private settingsButton!: Phaser.GameObjects.Text
   private isMuted: boolean = false
   private balloonSpeed: number = 30
   private praiseIndex: number = 0
   private levelEndText: string | null = null
+  private lastPlayedSound: string | null = null
+  
+  private settingsPanel!: Phaser.GameObjects.Container
+  private settingsOpen: boolean = false
+  
+  private formulaFontSize: number = 32
+  private targetFontSize: number = 32
 
   constructor() {
     super({ key: 'GameScene' })
@@ -38,22 +55,34 @@ export class GameScene extends Phaser.Scene {
     this.gameState = createInitialState(settings)
     this.balloonSpeed = settings.balloonSpeed === 'medium' ? 50 : 30
 
-    this.add.rectangle(400, 300, 800, 600, 0x87CEEB)
+    this.scale.on('resize', this.handleResize, this)
+    
+    this.calculateFontSizes()
+    
+    this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0x87CEEB)
 
     this.createCat()
     this.createUI()
+    this.createSettingsUI()
     this.createBalloons()
 
     this.input.keyboard?.on('keydown', this.handleKeyDown, this)
-
-    this.cursors = this.input.keyboard?.createCursorKeys()
+    this.input.on('pointerdown', this.handlePointerDown, this)
+  }
+  
+  private calculateFontSizes() {
+    this.formulaFontSize = Math.max(32, Math.ceil(32 * this.scale.width / 375))
+    this.targetFontSize = Math.max(32, Math.ceil(32 * this.scale.width / 375))
   }
 
-  private cursors?: Phaser.Types.Input.Keyboard.CursorKeys
+  private handleResize(gameSize: Phaser.Structs.Size) {
+    this.cameras.main.setViewport(0, 0, gameSize.width, gameSize.height)
+  }
 
   private createCat() {
+    this.catY = Math.min(460, this.scale.height - 140)
     this.cat = this.add.graphics()
-    this.drawCat(this.cat, this.catX, 460)
+    this.drawCat(this.cat, this.catX, this.catY)
   }
 
   private drawCat(graphics: Phaser.GameObjects.Graphics, x: number, y: number) {
@@ -80,20 +109,23 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createUI() {
-    this.add.text(400, 20, 'Котето и балоните', {
+    const centerX = this.scale.width / 2
+    
+    this.add.text(centerX, 20, 'Котето и балоните', {
       fontSize: '24px',
       color: '#FF1493',
       fontStyle: 'bold'
     }).setOrigin(0.5)
 
-    this.add.text(15, 530, 'Цел:', {
+    this.add.text(15, this.scale.height - 70, 'Цел:', {
       fontSize: '20px',
       color: '#000000',
       fontStyle: 'bold'
     })
 
-    this.targetText = this.add.text(75, 525, '', {
-      fontSize: '32px',
+    this.targetFontSize = 32
+    this.targetText = this.add.text(75, this.scale.height - 75, '', {
+      fontSize: `${this.targetFontSize}px`,
       color: '#000000',
       fontStyle: 'bold',
       backgroundColor: '#FFEB3B',
@@ -106,12 +138,12 @@ export class GameScene extends Phaser.Scene {
       fontStyle: 'bold'
     })
 
-    this.wrongAttemptsText = this.add.text(600, 530, '', {
+    this.wrongAttemptsText = this.add.text(this.scale.width - 200, this.scale.height - 70, '', {
       fontSize: '18px',
       color: '#555555'
     })
 
-    this.feedbackText = this.add.text(400, 300, '', {
+    this.feedbackText = this.add.text(centerX, this.scale.height / 2, '', {
       fontSize: '32px',
       color: '#FF1493',
       fontStyle: 'bold',
@@ -119,7 +151,7 @@ export class GameScene extends Phaser.Scene {
       padding: { x: 12, y: 6 }
     }).setOrigin(0.5).setVisible(false)
 
-    this.muteButton = this.add.text(740, 10, '🔊', {
+    this.muteButton = this.add.text(this.scale.width - 80, 10, '🔊', {
       fontSize: '32px',
       padding: { x: 16, y: 16 }
     }).setInteractive(
@@ -129,7 +161,130 @@ export class GameScene extends Phaser.Scene {
     this.muteButton.input!.cursor = 'pointer'
     this.muteButton.on('pointerdown', () => this.toggleMute())
 
+    this.settingsButton = this.add.text(this.scale.width - 160, 10, '⚙️', {
+      fontSize: '32px',
+      padding: { x: 16, y: 16 }
+    }).setInteractive(
+      new Phaser.Geom.Rectangle(0, 0, 64, 64),
+      Phaser.Geom.Rectangle.Contains
+    )
+    this.settingsButton.input!.cursor = 'pointer'
+    this.settingsButton.on('pointerdown', () => this.openSettings())
+    this.settingsButton.setData('testid', 'button-settings')
+
     this.updateUI()
+  }
+
+  private createSettingsUI() {
+    const centerX = this.scale.width / 2
+    const centerY = this.scale.height / 2
+    
+    this.settingsPanel = this.add.container(0, 0)
+    
+    const bg = this.add.rectangle(centerX, centerY, Math.min(600, this.scale.width - 40), Math.min(500, this.scale.height - 100), 0xFFFFFF, 0.95)
+    bg.setStrokeStyle(4, 0x4CAF50)
+    this.settingsPanel.add(bg)
+    
+    const title = this.add.text(centerX, centerY - 200, 'Настройки', {
+      fontSize: '28px',
+      color: '#000000',
+      fontStyle: 'bold'
+    }).setOrigin(0.5)
+    this.settingsPanel.add(title)
+    
+    let yOffset = centerY - 150
+    
+    const upperLimitLabel = this.add.text(centerX - 200, yOffset, 'Горна граница (5-20):', {
+      fontSize: '18px',
+      color: '#000000'
+    })
+    this.settingsPanel.add(upperLimitLabel)
+    
+    const upperLimitValue = this.add.text(centerX + 150, yOffset, String(this.gameState.settings.upperLimit), {
+      fontSize: '18px',
+      color: '#000000',
+      fontStyle: 'bold'
+    }).setData('testid', 'setting-upper-limit')
+    this.settingsPanel.add(upperLimitValue)
+    yOffset += 60
+    
+    const operationsLabel = this.add.text(centerX - 200, yOffset, 'Действия:', {
+      fontSize: '18px',
+      color: '#000000'
+    })
+    this.settingsPanel.add(operationsLabel)
+    
+    const operationsValue = this.add.text(centerX + 150, yOffset, this.translateOperation(this.gameState.settings.operations), {
+      fontSize: '18px',
+      color: '#000000',
+      fontStyle: 'bold'
+    }).setData('testid', 'setting-operations')
+    this.settingsPanel.add(operationsValue)
+    yOffset += 60
+    
+    const balloonCountLabel = this.add.text(centerX - 200, yOffset, 'Балони (2-5):', {
+      fontSize: '18px',
+      color: '#000000'
+    })
+    this.settingsPanel.add(balloonCountLabel)
+    
+    const balloonCountValue = this.add.text(centerX + 150, yOffset, String(this.gameState.settings.balloonCount), {
+      fontSize: '18px',
+      color: '#000000',
+      fontStyle: 'bold'
+    }).setData('testid', 'setting-balloon-count')
+    this.settingsPanel.add(balloonCountValue)
+    yOffset += 60
+    
+    const correctPerLevelLabel = this.add.text(centerX - 200, yOffset, 'Верни за ниво (5-20):', {
+      fontSize: '18px',
+      color: '#000000'
+    })
+    this.settingsPanel.add(correctPerLevelLabel)
+    
+    const correctPerLevelValue = this.add.text(centerX + 150, yOffset, String(this.gameState.settings.correctBalloonsPerLevel), {
+      fontSize: '18px',
+      color: '#000000',
+      fontStyle: 'bold'
+    }).setData('testid', 'setting-correct-per-level')
+    this.settingsPanel.add(correctPerLevelValue)
+    yOffset += 60
+    
+    const speedLabel = this.add.text(centerX - 200, yOffset, 'Скорост:', {
+      fontSize: '18px',
+      color: '#000000'
+    })
+    this.settingsPanel.add(speedLabel)
+    
+    const speedValue = this.add.text(centerX + 150, yOffset, this.translateSpeed(this.gameState.settings.balloonSpeed), {
+      fontSize: '18px',
+      color: '#000000',
+      fontStyle: 'bold'
+    }).setData('testid', 'setting-speed')
+    this.settingsPanel.add(speedValue)
+    yOffset += 80
+    
+    const closeButton = this.add.text(centerX, yOffset, 'Затвори', {
+      fontSize: '24px',
+      color: '#FFFFFF',
+      backgroundColor: '#2196F3',
+      padding: { x: 30, y: 15 }
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => this.closeSettings())
+    this.settingsPanel.add(closeButton)
+    
+    this.settingsPanel.setData('testid', 'settings-panel')
+    this.settingsPanel.setVisible(false)
+  }
+
+  private translateOperation(op: string): string {
+    if (op === 'addition') return 'само събиране'
+    if (op === 'subtraction') return 'само изваждане'
+    return 'двете'
+  }
+
+  private translateSpeed(speed: string): string {
+    return speed === 'slow' ? 'бавна' : 'средна'
   }
 
   private updateUI() {
@@ -147,9 +302,11 @@ export class GameScene extends Phaser.Scene {
 
     const balloonRadius = 40
     const safeMargin = 60
-    const availableWidth = 800 - (2 * safeMargin)
+    const availableWidth = this.scale.width - (2 * safeMargin)
     const count = this.gameState.round.balloons.length
     const spacing = availableWidth / count
+    
+    this.formulaFontSize = 32
     
     this.gameState.round.balloons.forEach((balloon, index) => {
       const x = safeMargin + spacing * (index + 0.5)
@@ -165,7 +322,7 @@ export class GameScene extends Phaser.Scene {
       sprite.on('pointerdown', () => this.handleBalloonClick(balloon.id))
 
       const text = this.add.text(0, 0, balloon.formula.display, {
-        fontSize: '32px',
+        fontSize: `${this.formulaFontSize}px`,
         color: '#000000',
         fontStyle: 'bold'
       }).setOrigin(0.5)
@@ -177,7 +334,9 @@ export class GameScene extends Phaser.Scene {
         text,
         x,
         y,
-        isCorrect: balloon.isCorrect
+        isCorrect: balloon.isCorrect,
+        isBouncing: false,
+        isPopping: false
       })
     })
   }
@@ -203,16 +362,56 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleBalloonClick(balloonId: string) {
-    const isCorrect = checkBalloon(this.gameState.round, balloonId)
+    if (this.catIsJumping) return
     
-    if (isCorrect) {
-      this.handleCorrectBalloon()
-    } else {
-      this.handleWrongBalloon()
+    const balloon = this.balloonSprites.find(b => b.id === balloonId)
+    if (!balloon) return
+    
+    const balloonCenterX = balloon.x
+    this.catTargetX = balloonCenterX
+    
+    this.time.delayedCall(500, () => {
+      if (Math.abs(this.catX - balloonCenterX) < 5) {
+        this.jumpToBalloon(balloonId)
+      }
+    })
+  }
+
+  private handlePointerDown(pointer: Phaser.Input.Pointer) {
+    if (this.settingsOpen) return
+    
+    for (const balloon of this.balloonSprites) {
+      const radius = 40
+      const distance = Phaser.Math.Distance.Between(pointer.x, pointer.y, balloon.x, balloon.y)
+      if (distance <= radius) {
+        this.handleBalloonClick(balloon.id)
+        break
+      }
     }
   }
 
-  private handleCorrectBalloon() {
+  private jumpToBalloon(balloonId: string) {
+    this.catIsJumping = true
+    this.catJumpStartY = this.catY
+    this.catJumpTime = 0
+    
+    const isCorrect = checkBalloon(this.gameState.round, balloonId)
+    
+    if (isCorrect) {
+      this.handleCorrectBalloon(balloonId)
+    } else {
+      this.handleWrongBalloon(balloonId)
+    }
+  }
+
+  private handleCorrectBalloon(balloonId: string) {
+    const balloon = this.balloonSprites.find(b => b.id === balloonId)
+    if (balloon) {
+      balloon.isPopping = true
+      balloon.popStartTime = this.time.now
+      this.playSound('pop')
+    }
+    
     this.showFeedback(getPraiseMessage(this.praiseIndex))
     this.praiseIndex++
 
@@ -229,10 +428,68 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private handleWrongBalloon() {
+  private handleWrongBalloon(balloonId: string) {
+    const balloon = this.balloonSprites.find(b => b.id === balloonId)
+    if (balloon) {
+      balloon.isBouncing = true
+      balloon.bounceStartTime = this.time.now
+      this.playSound('boing')
+    }
+    
+    this.playSound('meow')
     this.showFeedback(WRONG_ANSWER_MESSAGE)
     this.gameState.round = handleWrongAttempt(this.gameState.round)
     this.updateUI()
+  }
+
+  private playSound(soundName: string) {
+    if (this.isMuted) return
+    
+    this.lastPlayedSound = soundName
+    
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+    const oscillator = audioContext.createOscillator()
+    const gainNode = audioContext.createGain()
+    
+    oscillator.connect(gainNode)
+    gainNode.connect(audioContext.destination)
+    
+    if (soundName === 'pop') {
+      oscillator.frequency.setValueAtTime(800, audioContext.currentTime)
+      oscillator.frequency.exponentialRampToValueAtTime(100, audioContext.currentTime + 0.1)
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime)
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1)
+      oscillator.start(audioContext.currentTime)
+      oscillator.stop(audioContext.currentTime + 0.1)
+    } else if (soundName === 'boing') {
+      oscillator.frequency.setValueAtTime(200, audioContext.currentTime)
+      oscillator.frequency.exponentialRampToValueAtTime(600, audioContext.currentTime + 0.2)
+      gainNode.gain.setValueAtTime(0.2, audioContext.currentTime)
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2)
+      oscillator.start(audioContext.currentTime)
+      oscillator.stop(audioContext.currentTime + 0.2)
+    } else if (soundName === 'meow') {
+      oscillator.frequency.setValueAtTime(400, audioContext.currentTime)
+      oscillator.frequency.exponentialRampToValueAtTime(600, audioContext.currentTime + 0.15)
+      oscillator.frequency.exponentialRampToValueAtTime(300, audioContext.currentTime + 0.3)
+      gainNode.gain.setValueAtTime(0.2, audioContext.currentTime)
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3)
+      oscillator.start(audioContext.currentTime)
+      oscillator.stop(audioContext.currentTime + 0.3)
+    } else if (soundName === 'level-complete') {
+      const notes = [523.25, 587.33, 659.25, 783.99]
+      notes.forEach((freq, i) => {
+        const osc = audioContext.createOscillator()
+        const gain = audioContext.createGain()
+        osc.connect(gain)
+        gain.connect(audioContext.destination)
+        osc.frequency.value = freq
+        gain.gain.setValueAtTime(0.2, audioContext.currentTime + i * 0.2)
+        gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + i * 0.2 + 0.3)
+        osc.start(audioContext.currentTime + i * 0.2)
+        osc.stop(audioContext.currentTime + i * 0.2 + 0.3)
+      })
+    }
   }
 
   private showFeedback(message: string) {
@@ -246,7 +503,8 @@ export class GameScene extends Phaser.Scene {
 
   private showLevelComplete() {
     const stars = this.gameState.stars
-    this.levelEndText = `Ти успя! Събра ${stars} звездички!`
+    this.levelEndText = `${LEVEL_COMPLETE_TITLE} ${LEVEL_COMPLETE_MESSAGE(stars)}`
+    this.playSound('level-complete')
     this.scene.start('LevelCompleteScene', { 
       stars,
       gameState: this.gameState 
@@ -254,6 +512,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleKeyDown(event: KeyboardEvent) {
+    if (this.settingsOpen) return
+    
     if (event.key === 'ArrowLeft') {
       this.moveCat(-1)
     } else if (event.key === 'ArrowRight') {
@@ -264,15 +524,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   private moveCat(direction: number) {
-    this.catX += direction * 100
-    this.catX = Phaser.Math.Clamp(this.catX, 60, 740)
-    this.drawCat(this.cat, this.catX, 460)
+    this.catTargetX += direction * 100
+    this.catTargetX = Phaser.Math.Clamp(this.catTargetX, 60, this.scale.width - 60)
   }
 
   private jump() {
+    if (this.catIsJumping) return
+    
     const nearestBalloon = this.findNearestBalloon()
     if (nearestBalloon) {
-      this.handleBalloonClick(nearestBalloon.id)
+      this.jumpToBalloon(nearestBalloon.id)
     }
   }
 
@@ -288,24 +549,76 @@ export class GameScene extends Phaser.Scene {
       }
     })
 
-    return minDist < 100 ? nearest : null
+    return minDist <= 100 ? nearest : null
   }
 
-  update() {
-    this.balloonSprites.forEach(bs => {
-      bs.y += this.balloonSpeed * 0.016
-      bs.sprite.setPosition(bs.x, bs.y)
-      bs.text.setPosition(bs.x, bs.y)
-
-      if (shouldShowHint(this.gameState.round) && bs.isCorrect) {
-        bs.sprite.alpha = 0.7 + Math.sin(Date.now() * 0.005) * 0.3
+  update(time: number, delta: number) {
+    if (Math.abs(this.catX - this.catTargetX) > 2) {
+      const moveSpeed = 5
+      if (this.catX < this.catTargetX) {
+        this.catX += moveSpeed
       } else {
-        bs.sprite.alpha = 1
+        this.catX -= moveSpeed
       }
+      this.drawCat(this.cat, this.catX, this.catY)
+    }
+    
+    if (this.catIsJumping) {
+      this.catJumpTime += delta / 1000
+      const jumpDuration = 0.6
+      
+      if (this.catJumpTime < jumpDuration) {
+        const jumpHeight = 80
+        const progress = this.catJumpTime / jumpDuration
+        const arc = Math.sin(progress * Math.PI)
+        this.catY = this.catJumpStartY - arc * jumpHeight
+        this.drawCat(this.cat, this.catX, this.catY)
+      } else {
+        this.catIsJumping = false
+        this.catY = this.catJumpStartY
+        this.drawCat(this.cat, this.catX, this.catY)
+      }
+    }
+    
+    this.balloonSprites.forEach(bs => {
+      if (bs.isBouncing && bs.bounceStartTime) {
+        const elapsed = time - bs.bounceStartTime
+        if (elapsed < 300) {
+          const bounce = Math.sin((elapsed / 300) * Math.PI * 2) * 10
+          bs.sprite.setY(bs.y + bounce)
+          bs.text.setY(bs.y + bounce)
+        } else {
+          bs.isBouncing = false
+          bs.sprite.setY(bs.y)
+          bs.text.setY(bs.y)
+        }
+      } else if (bs.isPopping && bs.popStartTime) {
+        const elapsed = time - bs.popStartTime
+        if (elapsed < 400) {
+          const scale = 1 + (elapsed / 400) * 0.5
+          bs.sprite.setScale(scale)
+          bs.sprite.setAlpha(1 - elapsed / 400)
+          bs.text.setScale(scale)
+          bs.text.setAlpha(1 - elapsed / 400)
+        } else {
+          bs.sprite.setVisible(false)
+          bs.text.setVisible(false)
+        }
+      } else if (!bs.isPopping) {
+        bs.y += this.balloonSpeed * (delta / 1000)
+        bs.sprite.setPosition(bs.x, bs.y)
+        bs.text.setPosition(bs.x, bs.y)
 
-      if (bs.y > 400) {
-        this.gameState.round = resetBalloons(this.gameState.round)
-        this.createBalloons()
+        if (shouldShowHint(this.gameState.round) && bs.isCorrect) {
+          bs.sprite.alpha = 0.7 + Math.sin(time * 0.005) * 0.3
+        } else {
+          bs.sprite.alpha = 1
+        }
+
+        if (bs.y > this.scale.height - 150) {
+          this.gameState.round = resetBalloons(this.gameState.round)
+          this.createBalloons()
+        }
       }
     })
   }
@@ -315,7 +628,21 @@ export class GameScene extends Phaser.Scene {
     this.muteButton.setText(this.isMuted ? '🔇' : '🔊')
   }
 
-  getGameState() {
+  public openSettings() {
+    this.settingsOpen = true
+    this.settingsPanel.setVisible(true)
+  }
+
+  public closeSettings() {
+    this.settingsOpen = false
+    this.settingsPanel.setVisible(false)
+  }
+
+  public isSettingsOpen(): boolean {
+    return this.settingsOpen
+  }
+
+  public getGameState() {
     return {
       target: this.gameState.round.target,
       balloons: this.gameState.round.balloons.map(b => ({
@@ -333,11 +660,11 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  clickBalloon(balloonId: string) {
+  public clickBalloon(balloonId: string) {
     this.handleBalloonClick(balloonId)
   }
 
-  pressKey(key: 'left' | 'right' | 'space' | 'up') {
+  public pressKey(key: 'left' | 'right' | 'space' | 'up') {
     if (key === 'left') {
       this.moveCat(-1)
     } else if (key === 'right') {
@@ -347,15 +674,68 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  toggleMutePublic() {
+  public toggleMutePublic() {
     this.toggleMute()
   }
 
-  isMutedPublic() {
+  public isMutedPublic() {
     return this.isMuted
   }
 
-  getLevelEndText() {
+  public getLevelEndText() {
     return this.levelEndText
+  }
+
+  public getLastPlayedSound() {
+    return this.lastPlayedSound
+  }
+
+  public getFormulaFontSize() {
+    return this.formulaFontSize
+  }
+
+  public getTargetFontSize() {
+    return this.targetFontSize
+  }
+
+  public getMuteButtonBounds() {
+    return { width: 64, height: 64 }
+  }
+
+  public getCatPosition() {
+    return { x: this.catX, y: this.catY }
+  }
+
+  public getCatJumpState() {
+    return { isJumping: this.catIsJumping, restingY: this.catJumpStartY }
+  }
+
+  public getBalloonBounds(balloonId: string) {
+    const balloon = this.balloonSprites.find(b => b.id === balloonId)
+    if (!balloon) return null
+    
+    const radius = 40
+    return {
+      x: balloon.x - radius,
+      y: balloon.y - radius,
+      width: radius * 2,
+      height: radius * 2
+    }
+  }
+
+  public getBalloonAnimationState(balloonId: string) {
+    const balloon = this.balloonSprites.find(b => b.id === balloonId)
+    if (!balloon) return { isBouncing: false, isPopping: false }
+    
+    return {
+      isBouncing: balloon.isBouncing,
+      isPopping: balloon.isPopping
+    }
+  }
+
+  public setGameState(newState: GameState) {
+    this.gameState = newState
+    this.createBalloons()
+    this.updateUI()
   }
 }
