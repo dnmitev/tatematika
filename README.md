@@ -137,8 +137,34 @@ interface TatematikaTestHook {
   
   // Check if settings UI is currently open
   isSettingsOpen(): boolean
+  
+  // Get the Phaser.Game instance for direct scene/object inspection
+  // Used by real-geometry.spec.ts to measure actual rendered sizes
+  // Returns: Phaser.Game instance with access to scenes, scale, and all game objects
+  getGame(): Phaser.Game
 }
 ```
+
+### CSS Pixel Sizing Convention
+
+The game uses Phaser's `Scale.FIT` mode with a base game size of 800×600 game-space pixels, scaled to fit the viewport. To convert game-space measurements to CSS pixels (actual on-screen size):
+
+```typescript
+const canvas = document.querySelector('canvas')!
+const rect = canvas.getBoundingClientRect()
+
+// For games with fixed dimensions (800×600):
+const scale = rect.width / game.scale.width  // or rect.height / game.scale.height
+
+// Convert any game-space measurement to CSS pixels:
+const cssPx = gamePx * scale
+```
+
+**Important**: Use `game.scale.width` and `game.scale.height` (the actual game dimensions) rather than hardcoded 800 or 600. This ensures tests work correctly even if the game uses responsive portrait layouts or other resize modes.
+
+**Spec minimums in CSS pixels:**
+- Text (formulas, target number): ≥32 CSS px (spec §7)
+- Tap targets (buttons, balloons): ≥64×64 CSS px (spec §3)
 
 ### Required DOM test IDs for E2E tests
 
