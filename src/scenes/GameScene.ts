@@ -84,11 +84,8 @@ export class GameScene extends Phaser.Scene {
   }
   
   private calculateFontSizes() {
-    const minCssPx = 32
-    const referenceWidth = 800
-    const actualWidth = this.scale.width
-    this.formulaFontSize = Math.ceil(minCssPx * referenceWidth / actualWidth)
-    this.targetFontSize = Math.ceil(minCssPx * referenceWidth / actualWidth)
+    this.formulaFontSize = 69
+    this.targetFontSize = 69
   }
 
   private handleResize(gameSize: Phaser.Structs.Size) {
@@ -167,11 +164,11 @@ export class GameScene extends Phaser.Scene {
       padding: { x: 12, y: 6 }
     }).setOrigin(0.5).setVisible(false)
 
-    this.muteButton = this.add.text(this.scale.width - 80, 10, '🔊', {
-      fontSize: '32px',
-      padding: { x: 16, y: 16 }
+    this.muteButton = this.add.text(this.scale.width - 150, 10, '🔊', {
+      fontSize: '64px',
+      padding: { x: 32, y: 32 }
     }).setInteractive(
-      new Phaser.Geom.Rectangle(0, 0, 64, 64),
+      new Phaser.Geom.Rectangle(0, 0, 137, 137),
       Phaser.Geom.Rectangle.Contains
     )
     this.muteButton.input!.cursor = 'pointer'
@@ -219,18 +216,19 @@ export class GameScene extends Phaser.Scene {
     })
     this.balloonSprites = []
 
-    const balloonRadius = 40
-    const safeMargin = 60
-    const availableWidth = this.scale.width - (2 * safeMargin)
+    const balloonRadius = 69
     const count = this.gameState.round.balloons.length
-    const spacing = availableWidth / count
+    const balloonDiameter = balloonRadius * 2
+    const totalBalloonWidth = count * balloonDiameter
+    const availableWidth = this.scale.width
+    const spacing = (availableWidth - totalBalloonWidth) / (count + 1)
     
     this.gameState.round.balloons.forEach((balloon, index) => {
-      const x = safeMargin + spacing * (index + 0.5)
+      const x = spacing + balloonRadius + index * (balloonDiameter + spacing)
       const y = 110 + (index % 3) * 25
 
       const sprite = this.add.graphics()
-      this.drawBalloon(sprite, 0, 0, balloon.isCorrect)
+      this.drawBalloon(sprite, 0, 0, balloon.isCorrect, balloonRadius)
       sprite.setPosition(x, y)
       sprite.setInteractive(
         new Phaser.Geom.Circle(0, 0, balloonRadius),
@@ -258,10 +256,9 @@ export class GameScene extends Phaser.Scene {
     })
   }
 
-  private drawBalloon(graphics: Phaser.GameObjects.Graphics, x: number, y: number, isCorrect: boolean) {
+  private drawBalloon(graphics: Phaser.GameObjects.Graphics, x: number, y: number, isCorrect: boolean, radius: number = 69) {
     const colors = [0xFF6B6B, 0xFFD93D, 0x6BCB77, 0x4D96FF, 0xA78BFA]
     const color = colors[Math.floor(Math.random() * colors.length)]
-    const radius = 40
     
     graphics.fillStyle(color, 0.9)
     graphics.fillCircle(x, y, radius)
@@ -269,7 +266,7 @@ export class GameScene extends Phaser.Scene {
     graphics.strokeCircle(x, y, radius)
     
     graphics.fillStyle(0xFFFFFF, 0.3)
-    graphics.fillCircle(x - 10, y - 10, 8)
+    graphics.fillCircle(x - radius/4, y - radius/4, radius/8)
     
     graphics.lineStyle(2, 0x000000, 0.5)
     graphics.beginPath()
@@ -657,7 +654,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   public getMuteButtonBounds() {
-    return { width: 64, height: 64 }
+    return { width: 137, height: 137 }
   }
 
   public getCatPosition() {
@@ -672,7 +669,7 @@ export class GameScene extends Phaser.Scene {
     const balloon = this.balloonSprites.find(b => b.id === balloonId)
     if (!balloon) return null
     
-    const radius = 40
+    const radius = 69
     return {
       x: balloon.x - radius,
       y: balloon.y - radius,

@@ -48,18 +48,20 @@ declare global {
   }
 }
 
-// Phaser config with responsive sizing
-// Use RESIZE mode to adapt canvas to viewport without shrinking content
+// Phaser config with fixed game dimensions and responsive scaling
+// Game space is always 800x600, scaled to fit viewport
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
-  width: Math.max(375, window.innerWidth),
-  height: Math.max(600, window.innerHeight),
+  width: 800,
+  height: 600,
   parent: 'game-container',
   scene: [GameScene, LevelCompleteScene],
   backgroundColor: '#87CEEB',
   scale: {
-    mode: Phaser.Scale.RESIZE,
-    autoCenter: Phaser.Scale.CENTER_BOTH
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    width: 800,
+    height: 600
   }
 }
 
