@@ -93,4 +93,8 @@ export class LevelCompleteScene extends Phaser.Scene {
   private toMenu() {
     this.scene.start('GameScene')
   }
+
+  public getLevelEndText(): string {
+    return `${LEVEL_COMPLETE_TITLE} ${LEVEL_COMPLETE_MESSAGE(this.stars)}`
+  }
 }

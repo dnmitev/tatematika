@@ -116,6 +116,10 @@ window.__tatematika = {
     if (gameScene) {
       return gameScene.getLevelEndText()
     }
+    const levelCompleteScene = game.scene.getScene('LevelCompleteScene')
+    if (levelCompleteScene && levelCompleteScene.scene.isActive()) {
+      return (levelCompleteScene as any).getLevelEndText()
+    }
     return null
   },
   

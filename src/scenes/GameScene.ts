@@ -70,8 +70,11 @@ export class GameScene extends Phaser.Scene {
   }
   
   private calculateFontSizes() {
-    this.formulaFontSize = Math.max(32, Math.ceil(32 * this.scale.width / 375))
-    this.targetFontSize = Math.max(32, Math.ceil(32 * this.scale.width / 375))
+    const minCssPx = 32
+    const referenceWidth = 800
+    const actualWidth = this.scale.width
+    this.formulaFontSize = Math.ceil(minCssPx * referenceWidth / actualWidth)
+    this.targetFontSize = Math.ceil(minCssPx * referenceWidth / actualWidth)
   }
 
   private handleResize(gameSize: Phaser.Structs.Size) {
@@ -434,7 +437,20 @@ export class GameScene extends Phaser.Scene {
     
     const nearestBalloon = this.findNearestBalloon()
     if (nearestBalloon) {
-      this.jumpToBalloon(nearestBalloon.id)
+      this.catTargetX = nearestBalloon.x
+      
+      const distance = Math.abs(this.catX - nearestBalloon.x)
+      const moveTime = distance > 5 ? 500 : 0
+      
+      if (moveTime > 0) {
+        this.time.delayedCall(moveTime, () => {
+          if (Math.abs(this.catX - nearestBalloon.x) < 10) {
+            this.jumpToBalloon(nearestBalloon.id)
+          }
+        })
+      } else {
+        this.jumpToBalloon(nearestBalloon.id)
+      }
     }
   }
 
@@ -455,11 +471,15 @@ export class GameScene extends Phaser.Scene {
 
   update(time: number, delta: number) {
     if (Math.abs(this.catX - this.catTargetX) > 2) {
-      const moveSpeed = 5
+      const distance = this.catTargetX - this.catX
+      const moveSpeed = Math.min(Math.abs(distance), 10)
+      
       if (this.catX < this.catTargetX) {
         this.catX += moveSpeed
+        if (this.catX > this.catTargetX) this.catX = this.catTargetX
       } else {
         this.catX -= moveSpeed
+        if (this.catX < this.catTargetX) this.catX = this.catTargetX
       }
       this.drawCat(this.cat, this.catX, this.catY)
     }
@@ -549,6 +569,9 @@ export class GameScene extends Phaser.Scene {
     const settings = loadSettings()
     this.gameState.settings = settings
     this.balloonSpeed = settings.balloonSpeed === 'medium' ? 50 : 30
+    this.gameState = createInitialState(settings)
+    this.createBalloons()
+    this.updateUI()
   }
 
   public getGameState() {
@@ -570,7 +593,26 @@ export class GameScene extends Phaser.Scene {
   }
 
   public clickBalloon(balloonId: string) {
-    this.handleBalloonClick(balloonId)
+    if (this.catIsJumping) return
+    
+    const balloon = this.balloonSprites.find(b => b.id === balloonId)
+    if (!balloon) return
+    
+    const balloonCenterX = balloon.x
+    this.catTargetX = balloonCenterX
+    
+    const distance = Math.abs(this.catX - balloonCenterX)
+    const moveTime = distance > 5 ? 500 : 0
+    
+    if (moveTime > 0) {
+      this.time.delayedCall(moveTime, () => {
+        if (Math.abs(this.catX - balloonCenterX) < 10) {
+          this.jumpToBalloon(balloonId)
+        }
+      })
+    } else {
+      this.jumpToBalloon(balloonId)
+    }
   }
 
   public pressKey(key: 'left' | 'right' | 'space' | 'up') {
