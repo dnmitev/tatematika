@@ -40,6 +40,11 @@ export interface TatematikaTestHook {
   openSettings(): void
   closeSettings(): void
   isSettingsOpen(): boolean
+  
+  // Real geometry measurement hook
+  // Returns the Phaser.Game instance for direct scene/object inspection
+  // Used by real-geometry.spec.ts to measure actual rendered sizes
+  getGame(): Phaser.Game
 }
 
 // Expose test hooks
@@ -210,6 +215,10 @@ window.__tatematika = {
       return false
     }
     return gameScene.isSettingsOpen()
+  },
+  
+  getGame() {
+    return game
   }
 }
 
