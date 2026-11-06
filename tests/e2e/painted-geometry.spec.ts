@@ -312,20 +312,63 @@ async function testLayoutAndText(
   const geometry = await getAllBalloonGeometry(page)
   const textBounds = await getAllFormulaTextBounds(page)
   
+  // Get hit areas for all balloons
+  const hitAreas = await page.evaluate(() => {
+    const game = window.__tatematika!.getGame()
+    const scene = game.scene.getScene('GameScene') as any
+    const canvas = document.querySelector('canvas')!
+    const rect = canvas.getBoundingClientRect()
+    const scale = rect.width / game.scale.width
+    
+    return scene.balloonSprites.map((bs: any) => {
+      const hitAreaEllipse = bs.sprite.input?.hitArea as any
+      return {
+        widthGame: hitAreaEllipse.width,
+        heightGame: hitAreaEllipse.height,
+        widthCss: hitAreaEllipse.width * scale,
+        heightCss: hitAreaEllipse.height * scale
+      }
+    })
+  })
+  
   console.log(`Game area: ${geometry.gameWidth}×${geometry.gameHeight}`)
   console.log(`Scale: ${geometry.scale}`)
   
-  // Check each balloon fits in game area
-  for (const balloon of geometry.balloons) {
+  // Check each balloon: containment, size, and hit area match
+  for (let i = 0; i < geometry.balloons.length; i++) {
+    const balloon = geometry.balloons[i]
+    const hitArea = hitAreas[i]
     const fitsX = balloon.left >= 0 && balloon.right <= geometry.gameWidth
     const fitsY = balloon.top >= 0 && balloon.bottom <= geometry.gameHeight
     
-    console.log(`Balloon ${balloon.id}: (${balloon.left.toFixed(1)}, ${balloon.top.toFixed(1)}) to (${balloon.right.toFixed(1)}, ${balloon.bottom.toFixed(1)}) - fits: ${fitsX && fitsY}`)
+    const paintedWidthCss = balloon.width * geometry.scale
+    const paintedHeightCss = balloon.height * geometry.scale
     
+    console.log(`Balloon ${balloon.id}: (${balloon.left.toFixed(1)}, ${balloon.top.toFixed(1)}) to (${balloon.right.toFixed(1)}, ${balloon.bottom.toFixed(1)}) - fits: ${fitsX && fitsY}`)
+    console.log(`  Painted: ${paintedWidthCss.toFixed(1)}×${paintedHeightCss.toFixed(1)} CSS px (${balloon.width.toFixed(1)}×${balloon.height.toFixed(1)} game px)`)
+    console.log(`  Hit area: ${hitArea.widthCss.toFixed(1)}×${hitArea.heightCss.toFixed(1)} CSS px (${hitArea.widthGame}×${hitArea.heightGame} game px)`)
+    
+    // Containment checks
     expect(balloon.left, `Balloon ${balloon.id} left must be >= 0`).toBeGreaterThanOrEqual(0)
     expect(balloon.right, `Balloon ${balloon.id} right must be <= ${geometry.gameWidth}`).toBeLessThanOrEqual(geometry.gameWidth)
     expect(balloon.top, `Balloon ${balloon.id} top must be >= 0`).toBeGreaterThanOrEqual(0)
     expect(balloon.bottom, `Balloon ${balloon.id} bottom must be <= ${geometry.gameHeight}`).toBeLessThanOrEqual(geometry.gameHeight)
+    
+    // Spec §3: Painted balloon must be ≥64×64 CSS px
+    expect(paintedWidthCss, `Balloon ${balloon.id} painted width ${paintedWidthCss.toFixed(1)} CSS px must be ≥64 CSS px`).toBeGreaterThanOrEqual(64)
+    expect(paintedHeightCss, `Balloon ${balloon.id} painted height ${paintedHeightCss.toFixed(1)} CSS px must be ≥64 CSS px`).toBeGreaterThanOrEqual(64)
+    
+    // Painted must match hit area within ±10%
+    const widthRatio = paintedWidthCss / hitArea.widthCss
+    const heightRatio = paintedHeightCss / hitArea.heightCss
+    
+    console.log(`  Width ratio: ${(widthRatio * 100).toFixed(1)}% (painted/hit)`)
+    console.log(`  Height ratio: ${(heightRatio * 100).toFixed(1)}% (painted/hit)`)
+    
+    expect(widthRatio, `Balloon ${balloon.id} painted width must be 90-110% of hit area (got ${(widthRatio * 100).toFixed(1)}%)`).toBeGreaterThanOrEqual(0.9)
+    expect(widthRatio, `Balloon ${balloon.id} painted width must be 90-110% of hit area (got ${(widthRatio * 100).toFixed(1)}%)`).toBeLessThanOrEqual(1.1)
+    expect(heightRatio, `Balloon ${balloon.id} painted height must be 90-110% of hit area (got ${(heightRatio * 100).toFixed(1)}%)`).toBeGreaterThanOrEqual(0.9)
+    expect(heightRatio, `Balloon ${balloon.id} painted height must be 90-110% of hit area (got ${(heightRatio * 100).toFixed(1)}%)`).toBeLessThanOrEqual(1.1)
   }
   
   // Check no two balloons overlap (bounding box check)

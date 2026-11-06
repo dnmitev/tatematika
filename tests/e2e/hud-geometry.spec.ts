@@ -284,10 +284,36 @@ async function testHUDElements(page: any, viewportName: string, balloonCount: nu
   expect(settingsBox!.width, `${viewportName}, count ${balloonCount}: settings width must be ≥64 CSS px`).toBeGreaterThanOrEqual(64)
   expect(settingsBox!.height, `${viewportName}, count ${balloonCount}: settings height must be ≥64 CSS px`).toBeGreaterThanOrEqual(64)
   
-  // Settings button is a DOM element, so checking game area bounds is less meaningful
-  // but we can at least check it's on screen
-  expect(settingsBox!.x, `${viewportName}, count ${balloonCount}: settings x must be ≥0`).toBeGreaterThanOrEqual(0)
-  expect(settingsBox!.y, `${viewportName}, count ${balloonCount}: settings y must be ≥0`).toBeGreaterThanOrEqual(0)
+  // Settings button bounds - convert DOM position to game coordinates
+  const { canvasRect } = await getGameScaleAndRect(page)
+  
+  // Settings button is positioned in viewport coordinates
+  // Check it's fully visible within viewport
+  const viewportWidth = await page.evaluate(() => window.innerWidth)
+  const viewportHeight = await page.evaluate(() => window.innerHeight)
+  
+  expect(settingsBox!.x, `${viewportName}, count ${balloonCount}: settings left must be ≥0`).toBeGreaterThanOrEqual(0)
+  expect(settingsBox!.y, `${viewportName}, count ${balloonCount}: settings top must be ≥0`).toBeGreaterThanOrEqual(0)
+  expect(settingsBox!.x + settingsBox!.width, `${viewportName}, count ${balloonCount}: settings right must be ≤${viewportWidth}`).toBeLessThanOrEqual(viewportWidth)
+  expect(settingsBox!.y + settingsBox!.height, `${viewportName}, count ${balloonCount}: settings bottom must be ≤${viewportHeight}`).toBeLessThanOrEqual(viewportHeight)
+  
+  // Check settings button doesn't overlap balloons
+  // Convert settings button CSS coords to game coords for overlap check
+  const settingsGameLeft = (settingsBox!.x - canvasRect.left) / scale
+  const settingsGameTop = (settingsBox!.y - canvasRect.top) / scale
+  const settingsGameRight = (settingsBox!.x + settingsBox!.width - canvasRect.left) / scale
+  const settingsGameBottom = (settingsBox!.y + settingsBox!.height - canvasRect.top) / scale
+  
+  for (let i = 0; i < balloonEllipses.length; i++) {
+    const overlaps = aabbIntersectsEllipse(
+      settingsGameLeft,
+      settingsGameTop,
+      settingsGameRight,
+      settingsGameBottom,
+      balloonEllipses[i]
+    )
+    expect(overlaps, `${viewportName}, count ${balloonCount}: settings button overlaps balloon ${i}`).toBe(false)
+  }
 }
 
 // Helper to set balloon count via settings
