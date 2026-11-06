@@ -152,6 +152,8 @@ export class SettingsUI {
   }
 
   public close() {
+    this.handleChange()
+    
     if (this.panel) {
       this.panel.style.display = 'none'
     }
