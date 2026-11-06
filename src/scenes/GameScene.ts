@@ -99,7 +99,8 @@ export class GameScene extends Phaser.Scene {
       const rect = canvas.getBoundingClientRect()
       const scale = rect.width / 800
       const minGamePixels = minCSSPixels / scale
-      this.formulaFontSize = Math.max(minGamePixels, 48)
+      const maxFormula = this.scale.width / 16
+      this.formulaFontSize = Math.max(minGamePixels, Math.min(maxFormula, 60))
       this.targetFontSize = Math.max(minGamePixels, 56)
     } else {
       this.formulaFontSize = 48
@@ -239,63 +240,72 @@ export class GameScene extends Phaser.Scene {
     const canvas = document.querySelector('canvas')
     const scale = canvas ? canvas.getBoundingClientRect().width / 800 : 1
     const minCSSTarget = 64
-    const minGameTarget = minCSSTarget / scale
+    const minGameTargetDiameter = minCSSTarget / scale
     
-    const hudTop = 60
-    const hudBottom = 110
+    const hudTop = 50
+    const hudBottom = 90
     const availableHeight = 600 - hudTop - hudBottom
+    const safeMargin = 20
+    const availableWidth = 800 - 2 * safeMargin
     
-    const maxBalloonDiameter = count === 5 ? Math.min(minGameTarget, availableHeight / 3.5) : Math.min(minGameTarget, availableHeight)
-    
-    let balloonRadius: number
+    let balloonWidth: number
+    let balloonHeight: number
     let positions: Array<{ x: number; y: number }> = []
     
     if (count <= 3) {
-      balloonRadius = Math.min(maxBalloonDiameter / 2, 80)
-      const balloonWidth = balloonRadius * 1.5 * 2
-      const totalWidth = count * balloonWidth
-      const spacing = Math.max(20, (800 - totalWidth) / (count + 1))
+      const maxBalloonWidth = (availableWidth - (count - 1) * safeMargin) / count
+      const maxBalloonHeight = availableHeight
+      balloonWidth = Math.max(minGameTargetDiameter, Math.min(maxBalloonWidth, 200))
+      balloonHeight = Math.max(minGameTargetDiameter, Math.min(maxBalloonHeight, balloonWidth * 0.9))
+      
+      const totalWidth = count * balloonWidth + (count - 1) * safeMargin
+      const startX = (800 - totalWidth) / 2 + balloonWidth / 2
       const y = hudTop + availableHeight / 2
       
-      positions = this.gameState.round.balloons.map((_, index) => ({
-        x: spacing + balloonRadius * 1.5 + index * (balloonWidth + spacing),
+      positions = Array.from({ length: count }, (_, index) => ({
+        x: startX + index * (balloonWidth + safeMargin),
         y
       }))
     } else if (count === 4) {
-      balloonRadius = Math.min(maxBalloonDiameter / 2, 70)
-      const balloonWidth = balloonRadius * 1.5 * 2
-      const balloonHeight = balloonRadius * 2
-      const colSpacing = Math.max(20, (800 - 2 * balloonWidth) / 3)
-      const col1 = colSpacing + balloonRadius * 1.5
-      const col2 = colSpacing + balloonWidth + colSpacing + balloonRadius * 1.5
-      const rowSpacing = Math.max(10, (availableHeight - 2 * balloonHeight) / 3)
-      const row1Y = hudTop + rowSpacing + balloonRadius
-      const row2Y = hudTop + rowSpacing + balloonHeight + rowSpacing + balloonRadius
+      const maxBalloonWidth = (availableWidth - safeMargin) / 2
+      const maxBalloonHeight = (availableHeight - safeMargin) / 2
+      balloonWidth = Math.max(minGameTargetDiameter, Math.min(maxBalloonWidth, 180))
+      balloonHeight = Math.max(minGameTargetDiameter, Math.min(maxBalloonHeight, balloonWidth * 0.75))
+      
+      const col1 = safeMargin + balloonWidth / 2
+      const col2 = 800 - safeMargin - balloonWidth / 2
+      const row1 = hudTop + safeMargin + balloonHeight / 2
+      const row2 = hudTop + availableHeight - safeMargin - balloonHeight / 2
       
       positions = [
-        { x: col1, y: row1Y },
-        { x: col2, y: row1Y },
-        { x: col1, y: row2Y },
-        { x: col2, y: row2Y }
+        { x: col1, y: row1 },
+        { x: col2, y: row1 },
+        { x: col1, y: row2 },
+        { x: col2, y: row2 }
       ]
     } else {
-      balloonRadius = Math.min(maxBalloonDiameter / 2, 60)
-      const balloonWidth = balloonRadius * 1.5 * 2
-      const balloonHeight = balloonRadius * 2
-      const colSpacing = Math.max(20, (800 - 2 * balloonWidth) / 3)
-      const col1 = colSpacing + balloonRadius * 1.5
-      const col2 = colSpacing + balloonWidth + colSpacing + balloonRadius * 1.5
-      const rowSpacing = Math.max(5, (availableHeight - 3 * balloonHeight) / 4)
-      const row1Y = hudTop + rowSpacing + balloonRadius
-      const row2Y = hudTop + rowSpacing + balloonHeight + rowSpacing + balloonRadius
-      const row3Y = hudTop + rowSpacing + balloonHeight + rowSpacing + balloonHeight + rowSpacing + balloonRadius
+      const maxBalloonWidth = (availableWidth - safeMargin) / 2
+      const maxBalloonHeight = (availableHeight - 4 * safeMargin) / 3
+      balloonWidth = Math.max(minGameTargetDiameter, Math.min(maxBalloonWidth, 160))
+      balloonHeight = Math.max(minGameTargetDiameter, Math.min(maxBalloonHeight, balloonWidth * 0.75))
+      
+      const col1 = safeMargin + balloonWidth / 2
+      const col2 = 800 - safeMargin - balloonWidth / 2
+      const colCenter = 400
+      
+      const totalHeight = 3 * balloonHeight + 4 * safeMargin
+      const topMargin = hudTop + (availableHeight - totalHeight + 2 * safeMargin) / 2
+      
+      const row1 = topMargin + safeMargin + balloonHeight / 2
+      const row2 = row1 + balloonHeight + safeMargin
+      const row3 = row2 + balloonHeight + safeMargin
       
       positions = [
-        { x: 400, y: row1Y },
-        { x: col1, y: row2Y },
-        { x: col2, y: row2Y },
-        { x: col1, y: row3Y },
-        { x: col2, y: row3Y }
+        { x: colCenter, y: row1 },
+        { x: col1, y: row2 },
+        { x: col2, y: row2 },
+        { x: col1, y: row3 },
+        { x: col2, y: row3 }
       ]
     }
     
@@ -303,8 +313,6 @@ export class GameScene extends Phaser.Scene {
       const { x, y } = positions[index]
 
       const sprite = this.add.graphics()
-      const balloonWidth = balloonRadius * 1.5 * 2
-      const balloonHeight = balloonRadius * 2
       this.drawBalloon(sprite, 0, 0, balloon.isCorrect, balloonWidth, balloonHeight)
       sprite.setPosition(x, y)
       sprite.setInteractive(
