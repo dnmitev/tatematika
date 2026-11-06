@@ -278,7 +278,7 @@ export class GameScene extends Phaser.Scene {
     
     const availableHeight = this.scale.height - hudTopSpace - hudBottomSpace
     const availableWidth = this.scale.width
-    const margin = Math.max(15, this.scale.width * 0.04)
+    const margin = Math.max(15, Math.min(this.scale.width * 0.04, 30))
     
     const minTarget = 64
     
@@ -295,8 +295,10 @@ export class GameScene extends Phaser.Scene {
     tempTexts.forEach(t => t.destroy())
     
     const targetTextFitRatio = 0.8
-    let balloonWidth = Math.max(minTarget, maxFormulaWidth * 1.5)
-    let balloonHeight = Math.max(minTarget, maxFormulaHeight * 1.5)
+    const formulaBasedMinWidth = maxFormulaWidth / Math.sqrt(targetTextFitRatio / 2)
+    const formulaBasedMinHeight = maxFormulaHeight / Math.sqrt(targetTextFitRatio / 2)
+    let balloonWidth = Math.max(minTarget, formulaBasedMinWidth)
+    let balloonHeight = Math.max(minTarget, formulaBasedMinHeight)
     
     if (count >= 4) {
       const maxWidthForTwoCols = (availableWidth - 3 * margin) / 2
