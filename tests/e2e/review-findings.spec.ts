@@ -604,11 +604,14 @@ test.describe('Review Findings - Other Tests', () => {
     }
     
     // Poll until getLevelEndText contains 'Ти успя'
-    const levelText = await expect.poll(async () => {
-      return await page.evaluate(() => window.__tatematika!.getLevelEndText())
-    }, { timeout: 5000, intervals: [50] }).toContain('Ти успя')
+    await expect.poll(async () => {
+      const text = await page.evaluate(() => window.__tatematika!.getLevelEndText())
+      return text !== null && text.includes('Ти успя')
+    }, { timeout: 5000, intervals: [50] }).toBe(true)
     
+    const levelText = await page.evaluate(() => window.__tatematika!.getLevelEndText())
     expect(levelText).toBeTruthy()
+    expect(levelText).toContain('Ти успя')
   })
 
   test('Finding 8: "Още веднъж" must continue from current level (spec К7)', async ({ page }) => {
