@@ -344,9 +344,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private playSound(soundName: string) {
-    this.lastPlayedSound = soundName
-    
     if (this.isMuted) return
+    
+    this.lastPlayedSound = soundName
     
     const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
     const oscillator = audioContext.createOscillator()
