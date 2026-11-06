@@ -974,147 +974,219 @@ test.describe('Safe Zones - Mid-Jump - 1280×800', () => {
 import { PNG } from 'pngjs'
 
 /**
- * Label connected components in a binary image
- * Returns array of component labels (0 = background, 1+ = component ID)
+ * Test if a CSS pixel is inside or near an ellipse (within tolerance band)
  */
-function labelConnectedComponents(pixels: Uint8Array, width: number, height: number): {
-  labels: number[]
-  numComponents: number
-} {
-  const labels = new Array(width * height).fill(0)
-  let nextLabel = 1
-  
-  // Union-find structure
-  const parent: number[] = []
-  function find(x: number): number {
-    if (parent[x] !== x) {
-      parent[x] = find(parent[x])
-    }
-    return parent[x]
-  }
-  function union(x: number, y: number) {
-    const px = find(x)
-    const py = find(y)
-    if (px !== py) {
-      parent[px] = py
-    }
-  }
-  
-  // First pass: assign labels
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = y * width + x
-      const pixelIdx = idx * 4
-      
-      // Check if this is a foreground pixel (any RGBA channel non-zero)
-      if (pixels[pixelIdx] === 0 && pixels[pixelIdx + 1] === 0 && 
-          pixels[pixelIdx + 2] === 0 && pixels[pixelIdx + 3] === 0) {
-        continue
-      }
-      
-      const neighbors: number[] = []
-      
-      // Check left neighbor
-      if (x > 0) {
-        const leftLabel = labels[idx - 1]
-        if (leftLabel > 0) neighbors.push(leftLabel)
-      }
-      
-      // Check top neighbor
-      if (y > 0) {
-        const topLabel = labels[idx - width]
-        if (topLabel > 0) neighbors.push(topLabel)
-      }
-      
-      if (neighbors.length === 0) {
-        labels[idx] = nextLabel
-        parent[nextLabel] = nextLabel
-        nextLabel++
-      } else {
-        const minLabel = Math.min(...neighbors)
-        labels[idx] = minLabel
-        for (const n of neighbors) {
-          if (n !== minLabel) {
-            union(n, minLabel)
-          }
-        }
-      }
-    }
-  }
-  
-  // Second pass: flatten labels
-  const labelMap = new Map<number, number>()
-  let finalLabel = 1
-  for (let i = 0; i < labels.length; i++) {
-    if (labels[i] > 0) {
-      const root = find(labels[i])
-      if (!labelMap.has(root)) {
-        labelMap.set(root, finalLabel++)
-      }
-      labels[i] = labelMap.get(root)!
-    }
-  }
-  
-  return {
-    labels,
-    numComponents: finalLabel - 1
-  }
+function isPixelInEllipse(
+  pixelX: number,
+  pixelY: number,
+  ellipseCenterX: number,
+  ellipseCenterY: number,
+  ellipseRadiusX: number,
+  ellipseRadiusY: number,
+  tolerance: number
+): boolean {
+  const dx = pixelX - ellipseCenterX
+  const dy = pixelY - ellipseCenterY
+  const rx = ellipseRadiusX + tolerance
+  const ry = ellipseRadiusY + tolerance
+  return (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry) <= 1
 }
 
 /**
- * Compute bounding boxes for each component
+ * Self-test: verify comparison would fail with shifted ellipse
  */
-function computeComponentBounds(labels: number[], width: number, height: number, numComponents: number): Array<{
-  left: number
-  top: number
-  right: number
-  bottom: number
-  width: number
-  height: number
-  centerX: number
-  centerY: number
-}> {
-  const bounds: Array<{
-    left: number
-    top: number
-    right: number
-    bottom: number
-  }> = []
+function selfTestPixelValidation() {
+  // Create a simple test case: 100x100 image with one 40x30 ellipse
+  const width = 100
+  const height = 100
+  const diff = new Uint8Array(width * height * 4)
   
-  for (let i = 0; i <= numComponents; i++) {
-    bounds.push({
-      left: Infinity,
-      top: Infinity,
-      right: -Infinity,
-      bottom: -Infinity
-    })
-  }
-  
+  // Paint ellipse at (50, 50) with radii 20, 15
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      const label = labels[y * width + x]
-      if (label > 0) {
-        bounds[label].left = Math.min(bounds[label].left, x)
-        bounds[label].top = Math.min(bounds[label].top, y)
-        bounds[label].right = Math.max(bounds[label].right, x)
-        bounds[label].bottom = Math.max(bounds[label].bottom, y)
+      if (isPixelInEllipse(x, y, 50, 50, 20, 15, 0)) {
+        const idx = (y * width + x) * 4
+        diff[idx] = 255
+        diff[idx + 3] = 255
       }
     }
   }
   
-  return bounds.slice(1).map(b => ({
-    left: b.left,
-    top: b.top,
-    right: b.right,
-    bottom: b.bottom,
-    width: b.right - b.left + 1,
-    height: b.bottom - b.top + 1,
-    centerX: (b.left + b.right) / 2,
-    centerY: (b.top + b.bottom) / 2
-  }))
+  const ellipses = [{
+    centerX: 50,
+    centerY: 50,
+    radiusX: 20,
+    radiusY: 15,
+    width: 40,
+    height: 30,
+    id: 'test'
+  }]
+  
+  // Correct position should pass
+  const correct = validatePixelEllipseMatch(diff, width, height, ellipses, 1.0)
+  if (!correct.allMatch) {
+    throw new Error('Self-test failed: correct ellipse should match')
+  }
+  
+  // Shifted ellipse should fail
+  const shifted = [{
+    centerX: 70, // shifted +20px
+    centerY: 50,
+    radiusX: 20,
+    radiusY: 15,
+    width: 40,
+    height: 30,
+    id: 'test-shifted'
+  }]
+  
+  const incorrect = validatePixelEllipseMatch(diff, width, height, shifted, 1.0)
+  if (incorrect.allMatch) {
+    throw new Error('Self-test failed: shifted ellipse should NOT match')
+  }
+  
+  return true
+}
+
+/**
+ * Assign changed pixels to balloon ellipses and validate
+ */
+function validatePixelEllipseMatch(
+  diff: Uint8Array,
+  width: number,
+  height: number,
+  ellipses: Array<{
+    centerX: number
+    centerY: number
+    radiusX: number
+    radiusY: number
+    width: number
+    height: number
+    id: string
+  }>,
+  cssScale: number
+): {
+  allMatch: boolean
+  balloonMatches: Array<{
+    id: string
+    pixelBbox: { left: number; top: number; right: number; bottom: number; width: number; height: number; centerX: number; centerY: number }
+    commandBbox: { width: number; height: number; centerX: number; centerY: number }
+    widthError: number
+    heightError: number
+    centerDistX: number
+    centerDistY: number
+    pixelCount: number
+  }>
+  totalChangedPixels: number
+  coveredPixels: number
+  coveragePercent: number
+} {
+  const tolerance = 3 // CSS pixels - accounts for antialiasing beyond commandBuffer geometry
+  
+  // Count changed pixels and assign to balloons
+  const balloonPixels: Map<string, Set<string>> = new Map()
+  ellipses.forEach(e => balloonPixels.set(e.id, new Set()))
+  
+  let totalChanged = 0
+  let covered = 0
+  
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4
+      if (diff[idx] > 0 || diff[idx + 1] > 0 || diff[idx + 2] > 0 || diff[idx + 3] > 0) {
+        totalChanged++
+        
+        // Check which ellipse(s) cover this pixel
+        let anyCover = false
+        for (const ellipse of ellipses) {
+          if (isPixelInEllipse(x, y, ellipse.centerX, ellipse.centerY, ellipse.radiusX, ellipse.radiusY, tolerance)) {
+            balloonPixels.get(ellipse.id)!.add(`${x},${y}`)
+            anyCover = true
+          }
+        }
+        if (anyCover) covered++
+      }
+    }
+  }
+  
+  const coveragePercent = totalChanged > 0 ? (covered / totalChanged) * 100 : 0
+  
+  // Compute pixel bbox for each balloon
+  const balloonMatches = ellipses.map(ellipse => {
+    const pixels = balloonPixels.get(ellipse.id)!
+    
+    if (pixels.size === 0) {
+      return {
+        id: ellipse.id,
+        pixelBbox: { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0, centerX: 0, centerY: 0 },
+        commandBbox: { width: ellipse.width, height: ellipse.height, centerX: ellipse.centerX, centerY: ellipse.centerY },
+        widthError: 1.0,
+        heightError: 1.0,
+        centerDistX: 9999,
+        centerDistY: 9999,
+        pixelCount: 0
+      }
+    }
+    
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+    for (const coord of pixels) {
+      const [x, y] = coord.split(',').map(Number)
+      minX = Math.min(minX, x)
+      maxX = Math.max(maxX, x)
+      minY = Math.min(minY, y)
+      maxY = Math.max(maxY, y)
+    }
+    
+    const pixelBbox = {
+      left: minX,
+      top: minY,
+      right: maxX,
+      bottom: maxY,
+      width: maxX - minX + 1,
+      height: maxY - minY + 1,
+      centerX: (minX + maxX) / 2,
+      centerY: (minY + maxY) / 2
+    }
+    
+    const widthError = Math.abs(pixelBbox.width - ellipse.width) / ellipse.width
+    const heightError = Math.abs(pixelBbox.height - ellipse.height) / ellipse.height
+    const centerDistX = Math.abs(pixelBbox.centerX - ellipse.centerX)
+    const centerDistY = Math.abs(pixelBbox.centerY - ellipse.centerY)
+    
+    return {
+      id: ellipse.id,
+      pixelBbox,
+      commandBbox: { width: ellipse.width, height: ellipse.height, centerX: ellipse.centerX, centerY: ellipse.centerY },
+      widthError,
+      heightError,
+      centerDistX,
+      centerDistY,
+      pixelCount: pixels.size
+    }
+  })
+  
+  // All balloons must match
+  const allMatch = balloonMatches.every(m => 
+    m.widthError < 0.05 && 
+    m.heightError < 0.05 && 
+    m.centerDistX < 3 && 
+    m.centerDistY < 3 &&
+    m.pixelCount > 0
+  ) && coveragePercent >= 95
+  
+  return {
+    allMatch,
+    balloonMatches,
+    totalChangedPixels: totalChanged,
+    coveredPixels: covered,
+    coveragePercent
+  }
 }
 
 test.describe('Pixel Ground-Truth Validation', () => {
+  test('Self-test: shifted ellipse detection', () => {
+    expect(selfTestPixelValidation()).toBe(true)
+  })
+  
   test('320×568 count 3: CommandBuffer bounds match painted pixels', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 568 })
     await page.goto('/?balloonCount=3')
@@ -1137,85 +1209,129 @@ test.describe('Pixel Ground-Truth Validation', () => {
       }
     })
     
-    // Freeze the game loop and take screenshot with balloons
-    const screenshot1Buffer = await page.evaluate(async () => {
-      const game = window.__tatematika!.getGame()
-      
-      try {
-        game.loop.sleep()
-      } catch (e) {
-        return { error: 'Failed to freeze game loop', exception: String(e) }
-      }
-      
-      const canvas = document.querySelector('canvas') as HTMLCanvasElement
-      const dataUrl = canvas.toDataURL()
-      return { dataUrl }
-    })
-    
-    if ('error' in screenshot1Buffer) {
-      throw new Error(`Failed to freeze game: ${screenshot1Buffer.error}: ${screenshot1Buffer.exception}`)
-    }
-    
-    // Get balloon positions before hiding
-    const balloonsBefore = await getAllBalloonEllipses(page)
-    
-    // Hide balloons and their text, render one frame, take screenshot
-    const screenshot2Buffer = await page.evaluate(async () => {
+    // Freeze everything and take screenshots
+    const { dataUrl1, dataUrl2, balloons } = await page.evaluate(async () => {
       const game = window.__tatematika!.getGame()
       const scene = game.scene.getScene('GameScene') as any
       
-      // Hide balloon graphics and text
-      const hiddenObjects: any[] = []
-      for (const bs of scene.balloonSprites) {
-        bs.sprite.setVisible(false)
-        hiddenObjects.push(bs.sprite)
-        if (bs.formulaText) {
-          bs.formulaText.setVisible(false)
-          hiddenObjects.push(bs.formulaText)
-        }
+      // Freeze everything
+      scene.tweens.pauseAll()
+      scene.time.paused = true
+      if (scene.physics) {
+        scene.physics.pause()
       }
+      game.loop.sleep()
       
-      // Force one render
+      // Wait 100ms for all animations to settle
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      // Force one render with balloons visible
       game.loop.wake()
       game.loop.step(performance.now())
       game.loop.sleep()
       
       const canvas = document.querySelector('canvas') as HTMLCanvasElement
-      const dataUrl = canvas.toDataURL()
+      const dataUrl1 = canvas.toDataURL()
       
-      // Restore visibility
-      for (const obj of hiddenObjects) {
-        obj.setVisible(true)
+      // Get balloon positions
+      const balloons = scene.balloonSprites.map((bs: any) => {
+        const sprite = bs.sprite as any
+        const commandBuffer = sprite.commandBuffer
+        
+        // Parse bounds from commandBuffer (reuse helper logic)
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+        const Commands = { MOVE_TO: 5, LINE_TO: 4, FILL_PATH: 8 }
+        let currentPath: Array<{ x: number; y: number }> = []
+        
+        let i = 0
+        while (i < commandBuffer.length) {
+          const cmd = commandBuffer[i++]
+          if (cmd === Commands.MOVE_TO || cmd === Commands.LINE_TO) {
+            currentPath.push({ x: commandBuffer[i], y: commandBuffer[i + 1] })
+            i += 2
+          } else if (cmd === Commands.FILL_PATH) {
+            for (const p of currentPath) {
+              minX = Math.min(minX, p.x)
+              maxX = Math.max(maxX, p.x)
+              minY = Math.min(minY, p.y)
+              maxY = Math.max(maxY, p.y)
+            }
+            currentPath = []
+          } else if (cmd >= 0 && cmd <= 2) {
+            // BEGIN_PATH, CLOSE_PATH, etc - no args
+          } else if (cmd === 6) {
+            i += 3 // LINE_STYLE
+          } else if (cmd === 7) {
+            i += 2 // FILL_STYLE
+          } else if (cmd === 0) {
+            i += 6 // ARC
+          } else if (cmd === 10) {
+            i += 6 // FILL_TRIANGLE
+          }
+        }
+        
+        const scaleX = sprite.scaleX || 1
+        const scaleY = sprite.scaleY || 1
+        const effectiveWidth = (maxX - minX) * scaleX
+        const effectiveHeight = (maxY - minY) * scaleY
+        
+        return {
+          id: bs.id,
+          centerX: bs.x,
+          centerY: bs.y,
+          radiusX: effectiveWidth / 2,
+          radiusY: effectiveHeight / 2
+        }
+      })
+      
+      // Hide only balloon Graphics, keep Text visible
+      const hiddenGraphics: any[] = []
+      for (const bs of scene.balloonSprites) {
+        bs.sprite.setVisible(false)
+        hiddenGraphics.push(bs.sprite)
       }
       
-      // Wake the loop
+      // Force one render without balloons
+      game.loop.wake()
+      game.loop.step(performance.now())
+      game.loop.sleep()
+      
+      const dataUrl2 = canvas.toDataURL()
+      
+      // Restore everything
+      for (const g of hiddenGraphics) {
+        g.setVisible(true)
+      }
+      scene.tweens.resumeAll()
+      scene.time.paused = false
+      if (scene.physics) {
+        scene.physics.resume()
+      }
       game.loop.wake()
       
-      return { dataUrl }
+      return { dataUrl1, dataUrl2, balloons }
     })
     
-    // Get balloon positions after (should be close to same, allowing for float animation)
+    // Verify balloon positions are stable (float animation may cause ~2px drift)
     const balloonsAfter = await getAllBalloonEllipses(page)
-    
-    // Check balloon centers didn't move significantly (allow 3px for floating animation)
-    for (let i = 0; i < balloonsBefore.length; i++) {
-      const before = balloonsBefore[i]
-      const after = balloonsAfter.find(b => b.id === before.id)!
+    for (let i = 0; i < balloons.length; i++) {
+      const before = balloons[i]
+      const after = balloonsAfter.find((b: any) => b.id === before.id)!
       expect(Math.abs(before.centerX - after.centerX), 
-        `Balloon ${before.id} X didn't move significantly`).toBeLessThan(3)
+        `Balloon ${before.id} X stable (<2px)`).toBeLessThan(2)
       expect(Math.abs(before.centerY - after.centerY),
-        `Balloon ${before.id} Y has floating animation (<3px)`).toBeLessThan(3)
+        `Balloon ${before.id} Y stable (<2px)`).toBeLessThan(2)
     }
     
     // Decode screenshots
-    const png1 = PNG.sync.read(Buffer.from(screenshot1Buffer.dataUrl.split(',')[1], 'base64'))
-    const png2 = PNG.sync.read(Buffer.from(screenshot2Buffer.dataUrl.split(',')[1], 'base64'))
+    const png1 = PNG.sync.read(Buffer.from(dataUrl1.split(',')[1], 'base64'))
+    const png2 = PNG.sync.read(Buffer.from(dataUrl2.split(',')[1], 'base64'))
     
     expect(png1.width).toBe(png2.width)
     expect(png1.height).toBe(png2.height)
     
     // Compute diff
-    const diff = Buffer.alloc(png1.data.length)
+    const diff = new Uint8Array(png1.data.length)
     for (let i = 0; i < png1.data.length; i += 4) {
       if (png1.data[i] !== png2.data[i] ||
           png1.data[i + 1] !== png2.data[i + 1] ||
@@ -1228,127 +1344,63 @@ test.describe('Pixel Ground-Truth Validation', () => {
       }
     }
     
-    // Label connected components
-    const { labels, numComponents } = labelConnectedComponents(
-      new Uint8Array(diff),
-      png1.width,
-      png1.height
-    )
+    // Convert balloons to CSS pixel ellipses
+    // Add 3 CSS px to width/height to account for antialiasing beyond commandBuffer geometry
+    const ellipsesCSS = balloons.map((b: any) => ({
+      centerX: b.centerX * scaleInfo.scale,
+      centerY: b.centerY * scaleInfo.scale,
+      radiusX: b.radiusX * scaleInfo.scale,
+      radiusY: b.radiusY * scaleInfo.scale,
+      width: b.radiusX * 2 * scaleInfo.scale + 3,  // +3 CSS px for antialiasing
+      height: b.radiusY * 2 * scaleInfo.scale + 3, // +3 CSS px for antialiasing  
+      id: b.id
+    }))
     
-    // Note: numComponents might be less than balloon count if balloons overlap
-    // or more if formula text creates separate regions
-    console.log(`Found ${numComponents} connected components for ${balloonsBefore.length} balloons`)
+    // Validate pixel-ellipse match
+    const validation = validatePixelEllipseMatch(diff, png1.width, png1.height, ellipsesCSS, scaleInfo.scale)
     
-    // Compute pixel bounding boxes
-    const pixelBounds = computeComponentBounds(labels, png1.width, png1.height, numComponents)
-    
-    // Filter out very small components (likely text artifacts) and very large ones (canvas-wide artifacts)
-    console.log('All pixel bounds:', pixelBounds.map(pb => `${pb.width.toFixed(0)}x${pb.height.toFixed(0)}`).join(', '))
-    const validPixelBounds = pixelBounds.filter(pb => {
-      const tooSmall = pb.width < 20 || pb.height < 20
-      const tooWide = pb.width > png1.width * 0.9
-      const tooTall = pb.height > png1.height * 0.9
-      return !tooSmall && !tooWide && !tooTall
-    })
-    console.log(`Filtered to ${validPixelBounds.length} valid regions`)
-    
-    // Convert commandBuffer ellipses to CSS pixel bboxes
-    const commandBufferBounds = balloonsBefore.map(b => {
-      const left = (b.centerX - b.radiusX) * scaleInfo.scale
-      const right = (b.centerX + b.radiusX) * scaleInfo.scale
-      const top = (b.centerY - b.radiusY) * scaleInfo.scale
-      const bottom = (b.centerY + b.radiusY) * scaleInfo.scale
+    // Assert unconditionally for EVERY balloon
+    for (const match of validation.balloonMatches) {
+      expect(match.widthError,
+        `Balloon ${match.id.substring(0, 20)}... width (pixel: ${match.pixelBbox.width.toFixed(1)}, command+AA: ${match.commandBbox.width.toFixed(1)})`
+      ).toBeLessThan(0.05)
       
-      return {
-        left,
-        top,
-        right,
-        bottom,
-        width: right - left,
-        height: bottom - top,
-        centerX: (left + right) / 2,
-        centerY: (top + bottom) / 2,
-        id: b.id
-      }
-    })
-    
-    // Match each valid pixel region to nearest commandBuffer region
-    const matches: Array<{
-      pixelBounds: any
-      commandBounds: any
-      widthError: number
-      heightError: number
-      centerDistX: number
-      centerDistY: number
-    }> = []
-    
-    for (const pb of validPixelBounds) {
-      // Find nearest commandBuffer bounds by center distance
-      let nearest = commandBufferBounds[0]
-      let minDist = Infinity
+      expect(match.heightError,
+        `Balloon ${match.id.substring(0, 20)}... height (pixel: ${match.pixelBbox.height.toFixed(1)}, command+AA: ${match.commandBbox.height.toFixed(1)})`
+      ).toBeLessThan(0.05)
       
-      for (const cb of commandBufferBounds) {
-        const dist = Math.sqrt(
-          Math.pow(pb.centerX - cb.centerX, 2) +
-          Math.pow(pb.centerY - cb.centerY, 2)
-        )
-        if (dist < minDist) {
-          minDist = dist
-          nearest = cb
-        }
-      }
+      expect(match.centerDistX,
+        `Balloon ${match.id.substring(0, 20)}... center X`
+      ).toBeLessThan(3)
       
-      const widthError = Math.abs(pb.width - nearest.width) / nearest.width
-      const heightError = Math.abs(pb.height - nearest.height) / nearest.height
-      const centerDistX = Math.abs(pb.centerX - nearest.centerX)
-      const centerDistY = Math.abs(pb.centerY - nearest.centerY)
+      expect(match.centerDistY,
+        `Balloon ${match.id.substring(0, 20)}... center Y`
+      ).toBeLessThan(3)
       
-      matches.push({
-        pixelBounds: pb,
-        commandBounds: nearest,
-        widthError,
-        heightError,
-        centerDistX,
-        centerDistY
-      })
-      
-      // Only assert if this looks like a balloon (not text or overlap artifact)
-      if (widthError < 0.5 && heightError < 0.5 && centerDistX < 50 && centerDistY < 50) {
-        expect(widthError, 
-          `Balloon width match (pixel: ${pb.width.toFixed(1)}, command: ${nearest.width.toFixed(1)})`
-        ).toBeLessThan(0.10)
-        
-        expect(heightError,
-          `Balloon height match (pixel: ${pb.height.toFixed(1)}, command: ${nearest.height.toFixed(1)})`
-        ).toBeLessThan(0.10)
-        
-        expect(centerDistX, 'Balloon center X match').toBeLessThan(5)
-        expect(centerDistY, 'Balloon center Y match').toBeLessThan(5)
-      }
+      expect(match.pixelCount,
+        `Balloon ${match.id.substring(0, 20)}... has painted pixels`
+      ).toBeGreaterThan(0)
     }
     
-    const goodMatches = matches.filter(m => 
-      m.widthError < 0.10 && m.heightError < 0.10 && 
-      m.centerDistX < 5 && m.centerDistY < 5
-    )
-    
-    console.log(`${goodMatches.length} of ${balloonsBefore.length} balloons matched pixel regions well`)
-    
-    // Technique demonstration complete
-    expect(numComponents, 'Pixel diff captured some regions').toBeGreaterThan(0)
+    // Assert 95% coverage
+    expect(validation.coveragePercent,
+      `${validation.coveragePercent.toFixed(1)}% of ${validation.totalChangedPixels} changed pixels covered by ellipses`
+    ).toBeGreaterThanOrEqual(95)
     
     console.log('Pixel validation results for 320×568 count 3:')
-    console.table(matches.map((m, i) => ({
+    console.table(validation.balloonMatches.map((m, i) => ({
       balloon: i + 1,
-      pixelWidth: m.pixelBounds.width.toFixed(1),
-      commandWidth: m.commandBounds.width.toFixed(1),
+      pixelWidth: m.pixelBbox.width.toFixed(1),
+      commandWidth: m.commandBbox.width.toFixed(1),
       widthError: (m.widthError * 100).toFixed(2) + '%',
-      pixelHeight: m.pixelBounds.height.toFixed(1),
-      commandHeight: m.commandBounds.height.toFixed(1),
+      pixelHeight: m.pixelBbox.height.toFixed(1),
+      commandHeight: m.commandBbox.height.toFixed(1),
       heightError: (m.heightError * 100).toFixed(2) + '%',
       centerDistX: m.centerDistX.toFixed(1) + 'px',
-      centerDistY: m.centerDistY.toFixed(1) + 'px'
+      centerDistY: m.centerDistY.toFixed(1) + 'px',
+      pixels: m.pixelCount
     })))
+    console.log(`Coverage: ${validation.coveragePercent.toFixed(1)}% (${validation.coveredPixels}/${validation.totalChangedPixels} pixels)`)
   })
   
   test('1280×800 count 5: CommandBuffer bounds match painted pixels', async ({ page }) => {
@@ -1357,14 +1409,6 @@ test.describe('Pixel Ground-Truth Validation', () => {
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
     
     await page.waitForTimeout(500)
-    
-    // Verify balloon count
-    const actualCount = await page.evaluate(() => {
-      const game = window.__tatematika!.getGame()
-      const scene = game.scene.getScene('GameScene') as any
-      return scene.balloonSprites.length
-    })
-    console.log(`Actual balloon count: ${actualCount}`)
     
     const scaleInfo = await page.evaluate(() => {
       const game = window.__tatematika!.getGame()
@@ -1379,68 +1423,121 @@ test.describe('Pixel Ground-Truth Validation', () => {
       }
     })
     
-    const screenshot1Buffer = await page.evaluate(async () => {
-      const game = window.__tatematika!.getGame()
-      
-      try {
-        game.loop.sleep()
-      } catch (e) {
-        return { error: 'Failed to freeze game loop', exception: String(e) }
-      }
-      
-      const canvas = document.querySelector('canvas') as HTMLCanvasElement
-      const dataUrl = canvas.toDataURL()
-      return { dataUrl }
-    })
-    
-    if ('error' in screenshot1Buffer) {
-      throw new Error(`Failed to freeze game: ${screenshot1Buffer.error}: ${screenshot1Buffer.exception}`)
-    }
-    
-    const balloonsBefore = await getAllBalloonEllipses(page)
-    console.log(`Got ${balloonsBefore.length} balloons before hiding`)
-    
-    const screenshot2Buffer = await page.evaluate(async () => {
+    // Freeze everything and take screenshots
+    const { dataUrl1, dataUrl2, balloons } = await page.evaluate(async () => {
       const game = window.__tatematika!.getGame()
       const scene = game.scene.getScene('GameScene') as any
       
-      const hiddenObjects: any[] = []
-      for (const bs of scene.balloonSprites) {
-        bs.sprite.setVisible(false)
-        hiddenObjects.push(bs.sprite)
-        if (bs.formulaText) {
-          bs.formulaText.setVisible(false)
-          hiddenObjects.push(bs.formulaText)
-        }
+      // Freeze everything
+      scene.tweens.pauseAll()
+      scene.time.paused = true
+      if (scene.physics) {
+        scene.physics.pause()
       }
+      game.loop.sleep()
       
+      // Wait 100ms for all animations to settle
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      // Force one render with balloons visible
       game.loop.wake()
       game.loop.step(performance.now())
       game.loop.sleep()
       
       const canvas = document.querySelector('canvas') as HTMLCanvasElement
-      const dataUrl = canvas.toDataURL()
+      const dataUrl1 = canvas.toDataURL()
       
-      for (const obj of hiddenObjects) {
-        obj.setVisible(true)
+      // Get balloon positions
+      const balloons = scene.balloonSprites.map((bs: any) => {
+        const sprite = bs.sprite as any
+        const commandBuffer = sprite.commandBuffer
+        
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+        const Commands = { MOVE_TO: 5, LINE_TO: 4, FILL_PATH: 8 }
+        let currentPath: Array<{ x: number; y: number }> = []
+        
+        let i = 0
+        while (i < commandBuffer.length) {
+          const cmd = commandBuffer[i++]
+          if (cmd === Commands.MOVE_TO || cmd === Commands.LINE_TO) {
+            currentPath.push({ x: commandBuffer[i], y: commandBuffer[i + 1] })
+            i += 2
+          } else if (cmd === Commands.FILL_PATH) {
+            for (const p of currentPath) {
+              minX = Math.min(minX, p.x)
+              maxX = Math.max(maxX, p.x)
+              minY = Math.min(minY, p.y)
+              maxY = Math.max(maxY, p.y)
+            }
+            currentPath = []
+          } else if (cmd >= 0 && cmd <= 2) {
+            // no args
+          } else if (cmd === 6) {
+            i += 3
+          } else if (cmd === 7) {
+            i += 2
+          } else if (cmd === 0) {
+            i += 6
+          } else if (cmd === 10) {
+            i += 6
+          }
+        }
+        
+        const scaleX = sprite.scaleX || 1
+        const scaleY = sprite.scaleY || 1
+        const effectiveWidth = (maxX - minX) * scaleX
+        const effectiveHeight = (maxY - minY) * scaleY
+        
+        return {
+          id: bs.id,
+          centerX: bs.x,
+          centerY: bs.y,
+          radiusX: effectiveWidth / 2,
+          radiusY: effectiveHeight / 2
+        }
+      })
+      
+      // Hide only balloon Graphics, keep Text visible
+      const hiddenGraphics: any[] = []
+      for (const bs of scene.balloonSprites) {
+        bs.sprite.setVisible(false)
+        hiddenGraphics.push(bs.sprite)
       }
       
+      // Force one render without balloons
+      game.loop.wake()
+      game.loop.step(performance.now())
+      game.loop.sleep()
+      
+      const dataUrl2 = canvas.toDataURL()
+      
+      // Restore everything
+      for (const g of hiddenGraphics) {
+        g.setVisible(true)
+      }
+      scene.tweens.resumeAll()
+      scene.time.paused = false
+      if (scene.physics) {
+        scene.physics.resume()
+      }
       game.loop.wake()
       
-      return { dataUrl }
+      return { dataUrl1, dataUrl2, balloons }
     })
     
+    // Verify balloon positions are stable (float animation may cause ~2px drift)
     const balloonsAfter = await getAllBalloonEllipses(page)
-    
-    for (let i = 0; i < balloonsBefore.length; i++) {
-      const before = balloonsBefore[i]
-      const after = balloonsAfter.find(b => b.id === before.id)!
-      expect(Math.abs(before.centerX - after.centerX)).toBeLessThan(3)
-      expect(Math.abs(before.centerY - after.centerY)).toBeLessThan(3)
+    for (let i = 0; i < balloons.length; i++) {
+      const before = balloons[i]
+      const after = balloonsAfter.find((b: any) => b.id === before.id)!
+      expect(Math.abs(before.centerX - after.centerX), 
+        `Balloon ${before.id} X stable (<2px)`).toBeLessThan(2)
+      expect(Math.abs(before.centerY - after.centerY),
+        `Balloon ${before.id} Y stable (<2px)`).toBeLessThan(2)
     }
     
-    const png1 = PNG.sync.read(Buffer.from(screenshot1Buffer.dataUrl.split(',')[1], 'base64'))
-    const png2 = PNG.sync.read(Buffer.from(screenshot2Buffer.dataUrl.split(',')[1], 'base64'))
+    const png1 = PNG.sync.read(Buffer.from(dataUrl1.split(',')[1], 'base64'))
+    const png2 = PNG.sync.read(Buffer.from(dataUrl2.split(',')[1], 'base64'))
     
     expect(png1.width).toBe(png2.width)
     expect(png1.height).toBe(png2.height)
@@ -1458,124 +1555,63 @@ test.describe('Pixel Ground-Truth Validation', () => {
       }
     }
     
-    const { labels, numComponents } = labelConnectedComponents(
-      new Uint8Array(diff),
-      png1.width,
-      png1.height
-    )
+    // Convert balloons to CSS pixel ellipses
+    // Add 3 CSS px to width/height to account for antialiasing beyond commandBuffer geometry
+    const ellipsesCSS = balloons.map((b: any) => ({
+      centerX: b.centerX * scaleInfo.scale,
+      centerY: b.centerY * scaleInfo.scale,
+      radiusX: b.radiusX * scaleInfo.scale,
+      radiusY: b.radiusY * scaleInfo.scale,
+      width: b.radiusX * 2 * scaleInfo.scale + 3,  // +3 CSS px for antialiasing
+      height: b.radiusY * 2 * scaleInfo.scale + 3, // +3 CSS px for antialiasing  
+      id: b.id
+    }))
     
-    console.log(`Found ${numComponents} connected components for ${balloonsBefore.length} balloons`)
+    // Validate pixel-ellipse match
+    const validation = validatePixelEllipseMatch(diff, png1.width, png1.height, ellipsesCSS, scaleInfo.scale)
     
-    const pixelBounds = computeComponentBounds(labels, png1.width, png1.height, numComponents)
-    
-    console.log('All pixel bounds:', pixelBounds.map(pb => `${pb.width.toFixed(0)}x${pb.height.toFixed(0)}`).join(', '))
-    const validPixelBounds = pixelBounds.filter(pb => {
-      const tooSmall = pb.width < 20 || pb.height < 20
-      const tooWide = pb.width > png1.width * 0.9
-      const tooTall = pb.height > png1.height * 0.9
-      return !tooSmall && !tooWide && !tooTall
-    })
-    console.log(`Filtered to ${validPixelBounds.length} valid regions`)
-    
-    const commandBufferBounds = balloonsBefore.map(b => {
-      const left = (b.centerX - b.radiusX) * scaleInfo.scale
-      const right = (b.centerX + b.radiusX) * scaleInfo.scale
-      const top = (b.centerY - b.radiusY) * scaleInfo.scale
-      const bottom = (b.centerY + b.radiusY) * scaleInfo.scale
+    // Assert unconditionally for EVERY balloon
+    for (const match of validation.balloonMatches) {
+      expect(match.widthError,
+        `Balloon ${match.id.substring(0, 20)}... width (pixel: ${match.pixelBbox.width.toFixed(1)}, command+AA: ${match.commandBbox.width.toFixed(1)})`
+      ).toBeLessThan(0.05)
       
-      return {
-        left,
-        top,
-        right,
-        bottom,
-        width: right - left,
-        height: bottom - top,
-        centerX: (left + right) / 2,
-        centerY: (top + bottom) / 2,
-        id: b.id
-      }
-    })
-    
-    const matches: Array<{
-      pixelBounds: any
-      commandBounds: any
-      widthError: number
-      heightError: number
-      centerDistX: number
-      centerDistY: number
-    }> = []
-    
-    for (const pb of validPixelBounds) {
-      let nearest = commandBufferBounds[0]
-      let minDist = Infinity
+      expect(match.heightError,
+        `Balloon ${match.id.substring(0, 20)}... height (pixel: ${match.pixelBbox.height.toFixed(1)}, command+AA: ${match.commandBbox.height.toFixed(1)})`
+      ).toBeLessThan(0.05)
       
-      for (const cb of commandBufferBounds) {
-        const dist = Math.sqrt(
-          Math.pow(pb.centerX - cb.centerX, 2) +
-          Math.pow(pb.centerY - cb.centerY, 2)
-        )
-        if (dist < minDist) {
-          minDist = dist
-          nearest = cb
-        }
-      }
+      expect(match.centerDistX,
+        `Balloon ${match.id.substring(0, 20)}... center X`
+      ).toBeLessThan(3)
       
-      const widthError = Math.abs(pb.width - nearest.width) / nearest.width
-      const heightError = Math.abs(pb.height - nearest.height) / nearest.height
-      const centerDistX = Math.abs(pb.centerX - nearest.centerX)
-      const centerDistY = Math.abs(pb.centerY - nearest.centerY)
+      expect(match.centerDistY,
+        `Balloon ${match.id.substring(0, 20)}... center Y`
+      ).toBeLessThan(3)
       
-      matches.push({
-        pixelBounds: pb,
-        commandBounds: nearest,
-        widthError,
-        heightError,
-        centerDistX,
-        centerDistY
-      })
-      
-      // Only assert if this looks like a balloon (not text or overlap artifact)
-      if (widthError < 0.5 && heightError < 0.5 && centerDistX < 50 && centerDistY < 50) {
-        expect(widthError, 
-          `Balloon width match (pixel: ${pb.width.toFixed(1)}, command: ${nearest.width.toFixed(1)})`
-        ).toBeLessThan(0.10)
-        
-        expect(heightError,
-          `Balloon height match (pixel: ${pb.height.toFixed(1)}, command: ${nearest.height.toFixed(1)})`
-        ).toBeLessThan(0.10)
-        
-        expect(centerDistX, 'Balloon center X match').toBeLessThan(5)
-        expect(centerDistY, 'Balloon center Y match').toBeLessThan(5)
-      }
+      expect(match.pixelCount,
+        `Balloon ${match.id.substring(0, 20)}... has painted pixels`
+      ).toBeGreaterThan(0)
     }
     
-    // Ensure we found some matching regions (technique demonstration)
-    const goodMatches = matches.filter(m => 
-      m.widthError < 0.10 && m.heightError < 0.10 && 
-      m.centerDistX < 5 && m.centerDistY < 5
-    )
-    
-    // Test demonstrates the pixel-matching technique works
-    // Some balloons may overlap or have text that merges components
-    console.log(`${goodMatches.length} of ${balloonsBefore.length} balloons matched pixel regions well`)
-    
-    // Technique demonstration complete
-    // Note: Perfect matching requires all animations/tweens to be fully stopped
-    // The test demonstrates the pixel-diff approach is viable
-    expect(numComponents, 'Pixel diff captured some regions').toBeGreaterThan(0)
+    // Assert 95% coverage
+    expect(validation.coveragePercent,
+      `${validation.coveragePercent.toFixed(1)}% of ${validation.totalChangedPixels} changed pixels covered by ellipses`
+    ).toBeGreaterThanOrEqual(95)
     
     console.log('Pixel validation results for 1280×800 count 5:')
-    console.table(matches.map((m, i) => ({
+    console.table(validation.balloonMatches.map((m, i) => ({
       balloon: i + 1,
-      pixelWidth: m.pixelBounds.width.toFixed(1),
-      commandWidth: m.commandBounds.width.toFixed(1),
+      pixelWidth: m.pixelBbox.width.toFixed(1),
+      commandWidth: m.commandBbox.width.toFixed(1),
       widthError: (m.widthError * 100).toFixed(2) + '%',
-      pixelHeight: m.pixelBounds.height.toFixed(1),
-      commandHeight: m.commandBounds.height.toFixed(1),
+      pixelHeight: m.pixelBbox.height.toFixed(1),
+      commandHeight: m.commandBbox.height.toFixed(1),
       heightError: (m.heightError * 100).toFixed(2) + '%',
       centerDistX: m.centerDistX.toFixed(1) + 'px',
-      centerDistY: m.centerDistY.toFixed(1) + 'px'
+      centerDistY: m.centerDistY.toFixed(1) + 'px',
+      pixels: m.pixelCount
     })))
+    console.log(`Coverage: ${validation.coveragePercent.toFixed(1)}% (${validation.coveredPixels}/${validation.totalChangedPixels} pixels)`)
   })
 })
 
