@@ -79,6 +79,11 @@ interface TatematikaTestHook {
   // Used for К3 (sound on correct pop) and К10 (mute verification)
   getLastPlayedSound(): string | null
   
+  // Get total number of sounds actually played since game start
+  // Must NOT increase while muted (К10 mute verification)
+  // Used to verify mute blocks sound playback rather than just silencing
+  getSoundPlayCount(): number
+  
   // Get formula font size in Phaser game-space pixels
   // Must be ≥32px for spec §7 compliance (multiply by canvas scale for CSS px)
   getFormulaFontSize(): number

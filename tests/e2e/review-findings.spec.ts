@@ -21,17 +21,16 @@ test.describe('Review Findings - Regression Tests', () => {
     // Click wrong balloon
     await page.evaluate((id) => window.__tatematika!.clickBalloon(id), wrongBalloon.id)
     
-    // Wait for animation
-    await page.waitForTimeout(300)
-    
-    // Check that balloon is bouncing (not popping)
-    const animState = await page.evaluate(
-      (id) => window.__tatematika!.getBalloonAnimationState(id),
-      wrongBalloon.id
-    )
-    
-    expect(animState.isBouncing).toBe(true)
-    expect(animState.isPopping).toBe(false)
+    // Poll until balloon is bouncing
+    await expect.poll(async () => {
+      const animState = await page.evaluate(
+        (id) => window.__tatematika!.getBalloonAnimationState(id),
+        wrongBalloon.id
+      )
+      // Assert isPopping stays false on every sample
+      expect(animState.isPopping).toBe(false)
+      return animState.isBouncing
+    }, { timeout: 1000, intervals: [50] }).toBe(true)
   })
 
   test('Finding 2: К8 - Mouse click must move cat under balloon and make it jump (spec §3)', async ({ page }) => {
@@ -75,12 +74,14 @@ test.describe('Review Findings - Regression Tests', () => {
     
     // Precondition: cat must start away from target balloon
     // If cat is already under balloon, move it away
-    while (Math.abs(catStartPos.x - balloonCenterX) <= balloonRadius) {
+    let attempts = 0
+    while (Math.abs(catStartPos.x - balloonCenterX) <= balloonRadius && attempts < 20) {
       // Move cat away with keyboard
       const moveDirection = catStartPos.x < balloonCenterX ? 'ArrowLeft' : 'ArrowRight'
       await page.keyboard.press(moveDirection)
       await page.waitForTimeout(200)
       catStartPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
+      attempts++
     }
     
     // Assert precondition
@@ -216,12 +217,14 @@ test.describe('Review Findings - Touch Input', () => {
     
     // Precondition: cat must start away from target balloon
     // If cat is already under balloon, move it away
-    while (Math.abs(catStartPos.x - balloonCenterX) <= balloonRadius) {
+    let attempts = 0
+    while (Math.abs(catStartPos.x - balloonCenterX) <= balloonRadius && attempts < 20) {
       // Move cat away with keyboard
       const moveDirection = catStartPos.x < balloonCenterX ? 'ArrowLeft' : 'ArrowRight'
       await page.keyboard.press(moveDirection)
       await page.waitForTimeout(200)
       catStartPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
+      attempts++
     }
     
     // Assert precondition
@@ -436,13 +439,11 @@ test.describe('Review Findings - Other Tests', () => {
     // Click correct balloon
     await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correctBalloon.id)
     
-    // Wait for sound to play
-    await page.waitForTimeout(200)
+    // Poll until sound is played
+    const lastSound = await expect.poll(async () => {
+      return await page.evaluate(() => window.__tatematika!.getLastPlayedSound())
+    }, { timeout: 5000, intervals: [50] }).toBeTruthy()
     
-    // Check that "пук" sound was played
-    const lastSound = await page.evaluate(() => window.__tatematika!.getLastPlayedSound())
-    
-    expect(lastSound).toBeTruthy()
     expect(['pop', 'пук', 'correct']).toContain(lastSound)
   })
 
@@ -476,51 +477,93 @@ test.describe('Review Findings - Other Tests', () => {
       await page.evaluate(() => window.__tatematika!.toggleMute())
     }
     
-    // Pop a correct balloon and verify sound plays
+    // Pop a correct balloon and verify sound plays (count increases)
     let state = await page.evaluate(() => window.__tatematika!.getGameState())
+    let prevStars = state.stars
     const correctBalloon = state.balloons.find(b => b.isCorrect)!
     
+    const countBefore = await page.evaluate(() => window.__tatematika!.getSoundPlayCount())
+    
     await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correctBalloon.id)
-    await page.waitForTimeout(300)
     
-    const soundBeforeMute = await page.evaluate(() => window.__tatematika!.getLastPlayedSound())
-    expect(soundBeforeMute).toBeTruthy() // Sound should play when unmuted
+    // Wait for star to increment
+    await expect.poll(async () => {
+      const s = await page.evaluate(() => window.__tatematika!.getGameState())
+      return s.stars
+    }, { timeout: 5000, intervals: [50] }).toBe(prevStars + 1)
     
-    // Wait for new round
-    await page.waitForTimeout(1000)
+    const countAfterUnmuted = await page.evaluate(() => window.__tatematika!.getSoundPlayCount())
+    const lastSound = await page.evaluate(() => window.__tatematika!.getLastPlayedSound())
+    
+    expect(countAfterUnmuted).toBeGreaterThan(countBefore) // Sound played
+    expect(lastSound).toBeTruthy()
+    expect(['pop', 'пук', 'correct']).toContain(lastSound)
+    
+    // Wait for new round (target or balloon ids change)
+    const prevTarget = state.target
+    const prevBalloonIds = state.balloons.map(b => b.id)
+    await expect.poll(async () => {
+      const s = await page.evaluate(() => window.__tatematika!.getGameState())
+      return s.target !== prevTarget || !s.balloons.every((b, i) => b.id === prevBalloonIds[i])
+    }, { timeout: 5000, intervals: [50] }).toBe(true)
     
     // Now mute
     await page.evaluate(() => window.__tatematika!.toggleMute())
     const isMuted = await page.evaluate(() => window.__tatematika!.isMuted())
     expect(isMuted).toBe(true)
     
-    // Pop another correct balloon
+    // Pop another correct balloon while muted
     state = await page.evaluate(() => window.__tatematika!.getGameState())
+    prevStars = state.stars
     const nextCorrect = state.balloons.find(b => b.isCorrect)!
     
-    const soundBefore = await page.evaluate(() => window.__tatematika!.getLastPlayedSound())
+    const countBeforeMuted = await page.evaluate(() => window.__tatematika!.getSoundPlayCount())
     
     await page.evaluate((id) => window.__tatematika!.clickBalloon(id), nextCorrect.id)
+    
+    // Wait for star to increment
+    await expect.poll(async () => {
+      const s = await page.evaluate(() => window.__tatematika!.getGameState())
+      return s.stars
+    }, { timeout: 5000, intervals: [50] }).toBe(prevStars + 1)
+    
+    // Give effects 300ms to settle
     await page.waitForTimeout(300)
     
-    const soundAfterMute = await page.evaluate(() => window.__tatematika!.getLastPlayedSound())
+    const countAfterMuted = await page.evaluate(() => window.__tatematika!.getSoundPlayCount())
     
-    // When muted, no new sound should play (getLastPlayedSound should be null or unchanged)
-    expect(soundAfterMute).toBe(soundBefore) // Sound unchanged (no new sound played)
+    // When muted, count must NOT increase
+    expect(countAfterMuted).toBe(countBeforeMuted)
     
-    // Unmute and verify sound works again
-    await page.waitForTimeout(1000)
+    // Wait for new round
+    const prevTarget2 = state.target
+    const prevBalloonIds2 = state.balloons.map(b => b.id)
+    await expect.poll(async () => {
+      const s = await page.evaluate(() => window.__tatematika!.getGameState())
+      return s.target !== prevTarget2 || !s.balloons.every((b, i) => b.id === prevBalloonIds2[i])
+    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    
+    // Unmute and verify sound works again (count increases)
     await page.evaluate(() => window.__tatematika!.toggleMute())
     
     state = await page.evaluate(() => window.__tatematika!.getGameState())
+    prevStars = state.stars
     const thirdCorrect = state.balloons.find(b => b.isCorrect)!
     
-    await page.evaluate((id) => window.__tatematika!.clickBalloon(id), thirdCorrect.id)
-    await page.waitForTimeout(300)
+    const countBeforeUnmuted = await page.evaluate(() => window.__tatematika!.getSoundPlayCount())
     
-    const soundAfterUnmute = await page.evaluate(() => window.__tatematika!.getLastPlayedSound())
-    expect(soundAfterUnmute).toBeTruthy()
-    expect(soundAfterUnmute).not.toBe(soundBefore) // New sound played
+    await page.evaluate((id) => window.__tatematika!.clickBalloon(id), thirdCorrect.id)
+    
+    // Wait for star to increment
+    await expect.poll(async () => {
+      const s = await page.evaluate(() => window.__tatematika!.getGameState())
+      return s.stars
+    }, { timeout: 5000, intervals: [50] }).toBe(prevStars + 1)
+    
+    const countAfterUnmuted = await page.evaluate(() => window.__tatematika!.getSoundPlayCount())
+    
+    // After unmuting, count increases again
+    expect(countAfterUnmuted).toBeGreaterThan(countBeforeUnmuted)
   })
 
   test('Finding 7: getLevelEndText() must return text in LevelCompleteScene', async ({ page }) => {
@@ -543,21 +586,35 @@ test.describe('Review Findings - Other Tests', () => {
     
     // Pop 5 correct balloons to complete the level
     for (let i = 0; i < 5; i++) {
-      const state = await page.evaluate(() => window.__tatematika!.getGameState())
+      let state = await page.evaluate(() => window.__tatematika!.getGameState())
+      const prevStars = state.stars
       const correct = state.balloons.find(b => b.isCorrect)!
       
       await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correct.id)
-      await page.waitForTimeout(900) // Wait for new round
+      
+      // Wait for star to increment
+      await expect.poll(async () => {
+        const s = await page.evaluate(() => window.__tatematika!.getGameState())
+        return s.stars
+      }, { timeout: 5000, intervals: [50] }).toBe(prevStars + 1)
+      
+      // If not the last pop, wait for new round
+      if (i < 4) {
+        const prevTarget = state.target
+        const prevBalloonIds = state.balloons.map(b => b.id)
+        await expect.poll(async () => {
+          const s = await page.evaluate(() => window.__tatematika!.getGameState())
+          return s.target !== prevTarget || !s.balloons.every((b, idx) => b.id === prevBalloonIds[idx])
+        }, { timeout: 5000, intervals: [50] }).toBe(true)
+      }
     }
     
-    // Wait for level complete scene transition
-    await page.waitForTimeout(500)
-    
-    // getLevelEndText should return the celebration message
-    const levelText = await page.evaluate(() => window.__tatematika!.getLevelEndText())
+    // Poll until getLevelEndText contains 'Ти успя'
+    const levelText = await expect.poll(async () => {
+      return await page.evaluate(() => window.__tatematika!.getLevelEndText())
+    }, { timeout: 5000, intervals: [50] }).toContain('Ти успя')
     
     expect(levelText).toBeTruthy()
-    expect(levelText).toContain('Ти успя')
   })
 
   test('Finding 8: "Още веднъж" must continue from current level (spec К7)', async ({ page }) => {
@@ -582,40 +639,51 @@ test.describe('Review Findings - Other Tests', () => {
     
     // Complete level 1 (5 stars)
     for (let i = 0; i < 5; i++) {
-      const state = await page.evaluate(() => window.__tatematika!.getGameState())
+      let state = await page.evaluate(() => window.__tatematika!.getGameState())
+      const prevStars = state.stars
       const correct = state.balloons.find(b => b.isCorrect)!
+      
       await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correct.id)
-      await page.waitForTimeout(900)
+      
+      // Wait for star to increment
+      await expect.poll(async () => {
+        const s = await page.evaluate(() => window.__tatematika!.getGameState())
+        return s.stars
+      }, { timeout: 5000, intervals: [50] }).toBe(prevStars + 1)
+      
+      // If not the last pop, wait for new round
+      if (i < 4) {
+        const prevTarget = state.target
+        const prevBalloonIds = state.balloons.map(b => b.id)
+        await expect.poll(async () => {
+          const s = await page.evaluate(() => window.__tatematika!.getGameState())
+          return s.target !== prevTarget || !s.balloons.every((b, idx) => b.id === prevBalloonIds[idx])
+        }, { timeout: 5000, intervals: [50] }).toBe(true)
+      }
     }
     
-    // Wait for level complete screen
-    await page.waitForTimeout(500)
-    
-    // Click "Още веднъж" button
+    // Wait for button to be visible
     const playAgainButton = page.locator('[data-testid="button-play-again"]')
     await expect(playAgainButton).toBeVisible({ timeout: 5000 })
     await playAgainButton.click()
     
-    await page.waitForTimeout(500)
+    // Poll for stars === 0 and balloons.length === 3
+    await expect.poll(async () => {
+      const s = await page.evaluate(() => window.__tatematika!.getGameState())
+      return s.stars === 0 && s.balloons.length === 3
+    }, { timeout: 5000, intervals: [50] }).toBe(true)
     
-    // Should be playing level 2 now
     const stateAfter = await page.evaluate(() => window.__tatematika!.getGameState())
-    
-    // Stars should be reset to 0
-    expect(stateAfter.stars).toBe(0)
-    
-    // Game should be playable (not stuck on level complete screen)
-    expect(stateAfter.balloons).toHaveLength(3)
     expect(stateAfter.target).toBeGreaterThanOrEqual(0)
     
-    // Should be able to play (pop a balloon)
+    // Pop a balloon and verify stars increment to 1
     const correct = stateAfter.balloons.find(b => b.isCorrect)!
     await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correct.id)
-    await page.waitForTimeout(900)
     
-    const stateAfterPop = await page.evaluate(() => window.__tatematika!.getGameState())
-    expect(stateAfterPop.stars).toBe(1) // Star was added, game is progressing
-    
-    // This test fails if "Още веднъж" sends back to level 1 or gets stuck
+    // Poll for stars === 1
+    await expect.poll(async () => {
+      const s = await page.evaluate(() => window.__tatematika!.getGameState())
+      return s.stars
+    }, { timeout: 5000, intervals: [50] }).toBe(1)
   })
 })

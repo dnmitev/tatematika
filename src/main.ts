@@ -27,6 +27,7 @@ export interface TatematikaTestHook {
   
   // Regression test hooks for review findings
   getLastPlayedSound(): string | null
+  getSoundPlayCount(): number
   getFormulaFontSize(): number
   getTargetFontSize(): number
   getMuteButtonBounds(): { width: number; height: number }
@@ -132,6 +133,9 @@ window.__tatematika = {
       return null
     }
     return gameScene.getLastPlayedSound()
+  },
+  getSoundPlayCount() {
+    throw new Error('not implemented')
   },
   getFormulaFontSize() {
     const gameScene = getGameScene()
