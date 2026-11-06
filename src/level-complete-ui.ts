@@ -18,13 +18,11 @@ export class LevelCompleteUI {
       flex-direction: column;
       background: rgba(255, 215, 0, 0.3);
       z-index: 10001;
-      pointer-events: none;
     `
 
     const contentBox = document.createElement('div')
     contentBox.style.cssText = `
       text-align: center;
-      pointer-events: auto;
     `
 
     const title = document.createElement('h1')
@@ -53,6 +51,8 @@ export class LevelCompleteUI {
     playAgainButton.setAttribute('data-testid', 'button-play-again')
     playAgainButton.style.cssText = `
       display: block;
+      visibility: visible;
+      opacity: 1;
       width: 200px;
       height: 64px;
       margin: 0 auto 20px auto;
@@ -80,6 +80,8 @@ export class LevelCompleteUI {
     menuButton.setAttribute('data-testid', 'button-to-menu')
     menuButton.style.cssText = `
       display: block;
+      visibility: visible;
+      opacity: 1;
       width: 200px;
       height: 64px;
       margin: 0 auto;
