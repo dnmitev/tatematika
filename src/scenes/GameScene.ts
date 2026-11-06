@@ -410,12 +410,8 @@ export class GameScene extends Phaser.Scene {
       const sprite = this.add.graphics()
       this.drawBalloon(sprite, 0, 0, balloon.isCorrect, balloonWidth, balloonHeight)
       sprite.setPosition(x, y)
-      
-      const minHitArea = 64
-      const hitAreaWidth = Math.max(balloonWidth, minHitArea)
-      const hitAreaHeight = Math.max(balloonHeight, minHitArea)
       sprite.setInteractive(
-        new Phaser.Geom.Ellipse(0, 0, hitAreaWidth, hitAreaHeight),
+        new Phaser.Geom.Ellipse(0, 0, balloonWidth, balloonHeight),
         Phaser.Geom.Ellipse.Contains
       )
       sprite.on('pointerdown', () => this.handleBalloonClick(balloon.id))
@@ -605,12 +601,6 @@ export class GameScene extends Phaser.Scene {
 
   private handlePlayAgain() {
     this.levelCompleteUI.hide()
-    this.catIsJumping = false
-    this.catJumpTime = 0
-    this.pendingJumpBalloonId = null
-    this.catTargetX = this.catX
-    this.catY = this.catJumpStartY
-    this.drawCat(this.cat, this.catX, this.catY)
     this.gameState = startNewLevel(this.gameState)
     this.createBalloons()
     this.updateUI()
@@ -730,11 +720,9 @@ export class GameScene extends Phaser.Scene {
           bs.text.setVisible(false)
         }
       } else if (!bs.isPopping) {
-        if (!this.catIsJumping) {
-          bs.y += this.balloonSpeed * (delta / 1000)
-          bs.sprite.setPosition(bs.x, bs.y)
-          bs.text.setPosition(bs.x, bs.y)
-        }
+        bs.y += this.balloonSpeed * (delta / 1000)
+        bs.sprite.setPosition(bs.x, bs.y)
+        bs.text.setPosition(bs.x, bs.y)
 
         if (shouldShowHint(this.gameState.round) && bs.isCorrect) {
           bs.sprite.alpha = 0.7 + Math.sin(time * 0.005) * 0.3
@@ -742,15 +730,12 @@ export class GameScene extends Phaser.Scene {
           bs.sprite.alpha = 1
         }
 
-        const jumpHeight = 80
-        const catEarsHeight = 40
-        const catTopDuringJump = this.catJumpStartY - catEarsHeight - jumpHeight
+        const catTopY = this.catJumpStartY - 40
         const balloonRadius = bs.sprite.input ? (bs.sprite.input.hitArea as Phaser.Geom.Ellipse).height / 2 : 50
-        const verticalBuffer = 300
-        if (bs.y + balloonRadius > catTopDuringJump - verticalBuffer) {
+        const resetMargin = 20
+        if (bs.y + balloonRadius > catTopY - resetMargin) {
           this.gameState.round = resetBalloons(this.gameState.round)
           this.createBalloons()
-          return
         }
       }
     })
