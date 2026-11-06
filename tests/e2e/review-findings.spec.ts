@@ -492,10 +492,10 @@ test.describe('Review Findings - Other Tests', () => {
       return s.stars
     }, { timeout: 5000, intervals: [50] }).toBe(prevStars + 1)
     
-    const countAfterUnmuted = await page.evaluate(() => window.__tatematika!.getSoundPlayCount())
+    const countAfterFirstPop = await page.evaluate(() => window.__tatematika!.getSoundPlayCount())
     const lastSound = await page.evaluate(() => window.__tatematika!.getLastPlayedSound())
     
-    expect(countAfterUnmuted).toBeGreaterThan(countBefore) // Sound played
+    expect(countAfterFirstPop).toBeGreaterThan(countBefore) // Sound played
     expect(lastSound).toBeTruthy()
     expect(['pop', 'пук', 'correct']).toContain(lastSound)
     
