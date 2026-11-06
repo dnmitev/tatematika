@@ -267,19 +267,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleBalloonClick(balloonId: string) {
-    if (this.catIsJumping) return
-    
-    const balloon = this.balloonSprites.find(b => b.id === balloonId)
-    if (!balloon) return
-    
-    const balloonCenterX = balloon.x
-    this.catTargetX = balloonCenterX
-    
-    this.time.delayedCall(500, () => {
-      if (Math.abs(this.catX - balloonCenterX) < 5) {
-        this.jumpToBalloon(balloonId)
-      }
-    })
+    this.clickBalloon(balloonId)
   }
 
   private handlePointerDown(pointer: Phaser.Input.Pointer) {
@@ -607,10 +595,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   public clickBalloon(balloonId: string) {
-    if (this.catIsJumping) return
-    
     const balloon = this.balloonSprites.find(b => b.id === balloonId)
     if (!balloon) return
+    
+    if (this.catIsJumping) {
+      const isCorrect = checkBalloon(this.gameState.round, balloonId)
+      if (!isCorrect) {
+        this.gameState.round = handleWrongAttempt(this.gameState.round)
+        this.updateUI()
+      }
+      return
+    }
     
     const balloonCenterX = balloon.x
     const distance = Math.abs(this.catX - balloonCenterX)
