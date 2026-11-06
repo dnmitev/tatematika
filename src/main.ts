@@ -28,8 +28,11 @@ export interface TatematikaTestHook {
   // Regression test hooks for review findings
   getLastPlayedSound(): string | null
   getFormulaFontSize(): number
+  getTargetFontSize(): number
   getMuteButtonBounds(): { width: number; height: number }
   getCatPosition(): { x: number; y: number }
+  getCatJumpState(): { isJumping: boolean; restingY: number }
+  getBalloonBounds(balloonId: string): { x: number; y: number; width: number; height: number } | null
   getBalloonAnimationState(balloonId: string): { isBouncing: boolean; isPopping: boolean }
   
   // Settings UI test hooks
@@ -73,10 +76,6 @@ function getGameScene(): GameScene | null {
   return scene && scene.scene.isActive() ? (scene as GameScene) : null
 }
 
-function getLevelCompleteScene(): any {
-  return game.scene.getScene('LevelCompleteScene')
-}
-
 // Test hook implementation
 window.__tatematika = {
   getGameState() {
@@ -118,81 +117,44 @@ window.__tatematika = {
     if (gameScene) {
       return gameScene.getLevelEndText()
     }
-    const levelScene = getLevelCompleteScene()
-    if (levelScene && levelScene.scene.isActive()) {
-      return levelScene.getLevelEndText ? levelScene.getLevelEndText() : null
-    }
     return null
   },
   
-  // Regression test hooks
+  // Regression test hooks - stubs
   getLastPlayedSound() {
-    const gameScene = getGameScene()
-    if (!gameScene) {
-      throw new Error('GameScene not active')
-    }
-    return gameScene.getLastPlayedSound ? gameScene.getLastPlayedSound() : null
+    throw new Error('not implemented')
   },
-  
   getFormulaFontSize() {
-    const gameScene = getGameScene()
-    if (!gameScene) {
-      throw new Error('GameScene not active')
-    }
-    return gameScene.getFormulaFontSize ? gameScene.getFormulaFontSize() : 0
+    throw new Error('not implemented')
   },
-  
+  getTargetFontSize() {
+    throw new Error('not implemented')
+  },
   getMuteButtonBounds() {
-    const gameScene = getGameScene()
-    if (!gameScene) {
-      throw new Error('GameScene not active')
-    }
-    return gameScene.getMuteButtonBounds ? gameScene.getMuteButtonBounds() : { width: 0, height: 0 }
+    throw new Error('not implemented')
   },
-  
   getCatPosition() {
-    const gameScene = getGameScene()
-    if (!gameScene) {
-      throw new Error('GameScene not active')
-    }
-    return gameScene.getCatPosition ? gameScene.getCatPosition() : { x: 0, y: 0 }
+    throw new Error('not implemented')
   },
-  
+  getCatJumpState() {
+    throw new Error('not implemented')
+  },
+  getBalloonBounds(balloonId: string) {
+    throw new Error('not implemented')
+  },
   getBalloonAnimationState(balloonId: string) {
-    const gameScene = getGameScene()
-    if (!gameScene) {
-      throw new Error('GameScene not active')
-    }
-    return gameScene.getBalloonAnimationState ? gameScene.getBalloonAnimationState(balloonId) : { isBouncing: false, isPopping: false }
+    throw new Error('not implemented')
   },
   
-  // Settings UI hooks
+  // Settings UI hooks - stubs
   openSettings() {
-    const gameScene = getGameScene()
-    if (!gameScene) {
-      throw new Error('GameScene not active')
-    }
-    if (gameScene.openSettings) {
-      gameScene.openSettings()
-    }
+    throw new Error('not implemented')
   },
-  
   closeSettings() {
-    const gameScene = getGameScene()
-    if (!gameScene) {
-      throw new Error('GameScene not active')
-    }
-    if (gameScene.closeSettings) {
-      gameScene.closeSettings()
-    }
+    throw new Error('not implemented')
   },
-  
   isSettingsOpen() {
-    const gameScene = getGameScene()
-    if (!gameScene) {
-      return false
-    }
-    return gameScene.isSettingsOpen ? gameScene.isSettingsOpen() : false
+    throw new Error('not implemented')
   }
 }
 

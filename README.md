@@ -76,11 +76,16 @@ interface TatematikaTestHook {
   
   // Get last played sound key (e.g., 'pop', 'bounce', 'meow')
   // Returns null if no sound played or sound is muted
+  // Used for К3 (sound on correct pop) and К10 (mute verification)
   getLastPlayedSound(): string | null
   
   // Get formula font size in Phaser game-space pixels
   // Must be ≥32px for spec §7 compliance (multiply by canvas scale for CSS px)
   getFormulaFontSize(): number
+  
+  // Get target number font size in Phaser game-space pixels
+  // Must be ≥32px for spec §7 compliance (multiply by canvas scale for CSS px)
+  getTargetFontSize(): number
   
   // Get mute button interactive bounds in game-space pixels
   // Must be ≥64×64 for spec §3 compliance (multiply by canvas scale for CSS px)
@@ -89,6 +94,21 @@ interface TatematikaTestHook {
   // Get cat's current position in game space
   // Used to verify К8: cat moves under balloon on click/touch
   getCatPosition(): { x: number; y: number }
+  
+  // Get cat jump state for К8 verification
+  // isJumping: true when cat is currently jumping
+  // restingY: the y position where cat sits (to detect when it jumps above)
+  getCatJumpState(): { isJumping: boolean; restingY: number }
+  
+  // Get balloon bounds in game-space pixels (includes formula text)
+  // Returns null if balloon not found
+  // Used for К8 (cat moves under balloon) and responsive size tests
+  getBalloonBounds(balloonId: string): { 
+    x: number
+    y: number
+    width: number
+    height: number
+  } | null
   
   // Get balloon animation state for К4 verification
   // isBouncing: true when balloon bounces on wrong answer

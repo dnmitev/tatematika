@@ -22,19 +22,19 @@ test.describe('Parent Settings UI', () => {
     // Look for settings button (data-testid="button-settings")
     
     const settingsButton = page.locator('[data-testid="button-settings"]')
-    await expect(settingsButton).toBeVisible()
+    await expect(settingsButton).toBeVisible({ timeout: 5000 })
     
     // Click to open settings
     await settingsButton.click()
     await page.waitForTimeout(300)
     
-    // Settings panel should be visible
+    // Settings panel must be visible
+    const settingsPanel = page.locator('[data-testid="settings-panel"]')
+    await expect(settingsPanel).toBeVisible({ timeout: 5000 })
+    
+    // Hook should report settings are open
     const isOpen = await page.evaluate(() => window.__tatematika!.isSettingsOpen())
     expect(isOpen).toBe(true)
-    
-    // Settings panel should be visible
-    const settingsPanel = page.locator('[data-testid="settings-panel"]')
-    await expect(settingsPanel).toBeVisible()
   })
 
   test('Upper limit setting: change from 6 to 10 (range 5-20)', async ({ page }) => {

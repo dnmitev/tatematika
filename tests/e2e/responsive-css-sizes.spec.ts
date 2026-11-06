@@ -49,12 +49,8 @@ test.describe('Responsive CSS Sizes - Mobile 375×667', () => {
       return rect.width / 800
     })
     
-    // Get target font size (should be exposed in test hook)
-    const targetFontSize = await page.evaluate(() => {
-      const gameScene = (window as any).game?.scene?.getScene('GameScene')
-      return gameScene?.targetText?.style?.fontSize ? 
-        parseInt(gameScene.targetText.style.fontSize) : 0
-    })
+    // Get target font size through hook
+    const targetFontSize = await page.evaluate(() => window.__tatematika!.getTargetFontSize())
     
     const cssTargetSize = targetFontSize * scale
     
@@ -62,7 +58,6 @@ test.describe('Responsive CSS Sizes - Mobile 375×667', () => {
   })
 
   test('Balloons must be at least 64×64 CSS pixels on mobile (spec §3)', async ({ page }) => {
-    // Balloons are circles with radius 40 in game space (diameter 80)
     const scale = await page.evaluate(() => {
       const canvas = document.querySelector('canvas')
       if (!canvas) return 0
@@ -70,9 +65,14 @@ test.describe('Responsive CSS Sizes - Mobile 375×667', () => {
       return rect.width / 800
     })
     
-    // Balloon radius is 40 game pixels, diameter 80
-    const balloonDiameter = 80
-    const cssDiameter = balloonDiameter * scale
+    // Get real balloon bounds from hook
+    const state = await page.evaluate(() => window.__tatematika!.getGameState())
+    const firstBalloon = state.balloons[0]
+    
+    const balloonBounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), firstBalloon.id)
+    expect(balloonBounds).not.toBeNull()
+    
+    const cssDiameter = Math.max(balloonBounds!.width, balloonBounds!.height) * scale
     
     expect(cssDiameter).toBeGreaterThanOrEqual(64)
   })
@@ -112,7 +112,7 @@ test.describe('Responsive CSS Sizes - Mobile 375×667', () => {
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
     expect(state.balloons).toHaveLength(5)
     
-    // Get canvas bounds
+    // Get canvas bounds and scale
     const canvasInfo = await page.evaluate(() => {
       const canvas = document.querySelector('canvas')
       if (!canvas) return null
@@ -120,46 +120,70 @@ test.describe('Responsive CSS Sizes - Mobile 375×667', () => {
       return {
         width: rect.width,
         height: rect.height,
+        left: rect.left,
+        top: rect.top,
         scale: rect.width / 800
       }
     })
     
     expect(canvasInfo).not.toBeNull()
     
-    // Calculate if balloons would be cropped
-    // With 5 balloons at spacing, rightmost should be visible
-    // Balloons span from ~60px to ~740px in game space
-    // With radius 40, rightmost edge is at ~780px
-    const rightmostEdge = 780 * canvasInfo!.scale
+    // Get viewport size
+    const viewportHeight = 667
+    const viewportWidth = 375
     
-    expect(rightmostEdge).toBeLessThanOrEqual(canvasInfo!.width)
+    // Check each balloon is fully visible (within viewport)
+    for (const balloon of state.balloons) {
+      const bounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), balloon.id)
+      expect(bounds).not.toBeNull()
+      
+      // Convert to CSS pixels
+      const cssLeft = bounds!.x * canvasInfo!.scale + canvasInfo!.left
+      const cssTop = bounds!.y * canvasInfo!.scale + canvasInfo!.top
+      const cssRight = (bounds!.x + bounds!.width) * canvasInfo!.scale + canvasInfo!.left
+      const cssBottom = (bounds!.y + bounds!.height) * canvasInfo!.scale + canvasInfo!.top
+      
+      // All edges must be within viewport
+      expect(cssLeft).toBeGreaterThanOrEqual(0)
+      expect(cssTop).toBeGreaterThanOrEqual(0)
+      expect(cssRight).toBeLessThanOrEqual(viewportWidth)
+      expect(cssBottom).toBeLessThanOrEqual(viewportHeight)
+    }
   })
 
   test('Level complete buttons must be at least 64×64 CSS pixels on mobile (spec §3)', async ({ page }) => {
-    // Fast-forward to level complete
+    // Lower requirement for speed
     await page.evaluate(() => {
-      const gameScene = (window as any).game?.scene?.getScene('GameScene')
-      if (gameScene) {
-        for (let i = 0; i < 10; i++) {
-          gameScene.gameState = (window as any).addStar?.(gameScene.gameState) || gameScene.gameState
-        }
-        if (gameScene.showLevelComplete) {
-          gameScene.showLevelComplete()
-        }
-      }
+      localStorage.setItem('tatematika-kote-balonche-settings', JSON.stringify({
+        upperLimit: 6,
+        operations: 'both',
+        balloonCount: 3,
+        correctBalloonsPerLevel: 5,
+        balloonSpeed: 'slow'
+      }))
     })
+    
+    await page.reload()
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    
+    // Complete level
+    for (let i = 0; i < 5; i++) {
+      const state = await page.evaluate(() => window.__tatematika!.getGameState())
+      const correct = state.balloons.find(b => b.isCorrect)!
+      await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correct.id)
+      await page.waitForTimeout(900)
+    }
     
     await page.waitForTimeout(500)
     
     // Check "Още веднъж" button
     const playAgainButton = page.locator('[data-testid="button-play-again"]')
-    if (await playAgainButton.count() > 0) {
-      const box = await playAgainButton.boundingBox()
-      if (box) {
-        expect(box.width).toBeGreaterThanOrEqual(64)
-        expect(box.height).toBeGreaterThanOrEqual(64)
-      }
-    }
+    await expect(playAgainButton).toBeVisible({ timeout: 5000 })
+    
+    const box = await playAgainButton.boundingBox()
+    expect(box).not.toBeNull()
+    expect(box!.width).toBeGreaterThanOrEqual(64)
+    expect(box!.height).toBeGreaterThanOrEqual(64)
   })
 
   test('Formulas remain readable when scaled down on mobile', async ({ page }) => {
@@ -222,11 +246,7 @@ test.describe('Responsive CSS Sizes - Desktop 1920×1080', () => {
       return rect.width / 800
     })
     
-    const targetFontSize = await page.evaluate(() => {
-      const gameScene = (window as any).game?.scene?.getScene('GameScene')
-      return gameScene?.targetText?.style?.fontSize ? 
-        parseInt(gameScene.targetText.style.fontSize) : 0
-    })
+    const targetFontSize = await page.evaluate(() => window.__tatematika!.getTargetFontSize())
     
     const cssTargetSize = targetFontSize * scale
     
@@ -241,8 +261,13 @@ test.describe('Responsive CSS Sizes - Desktop 1920×1080', () => {
       return rect.width / 800
     })
     
-    const balloonDiameter = 80
-    const cssDiameter = balloonDiameter * scale
+    const state = await page.evaluate(() => window.__tatematika!.getGameState())
+    const firstBalloon = state.balloons[0]
+    
+    const balloonBounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), firstBalloon.id)
+    expect(balloonBounds).not.toBeNull()
+    
+    const cssDiameter = Math.max(balloonBounds!.width, balloonBounds!.height) * scale
     
     expect(cssDiameter).toBeGreaterThanOrEqual(64)
   })
@@ -288,28 +313,41 @@ test.describe('Responsive CSS Sizes - Desktop 1920×1080', () => {
       return {
         width: rect.width,
         height: rect.height,
+        left: rect.left,
+        top: rect.top,
         scale: rect.width / 800
       }
     })
     
     expect(canvasInfo).not.toBeNull()
     
-    // All 5 balloons should fit within canvas
-    const rightmostEdge = 780 * canvasInfo!.scale
-    expect(rightmostEdge).toBeLessThanOrEqual(canvasInfo!.width)
+    // Check each balloon is fully within canvas
+    for (const balloon of state.balloons) {
+      const bounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), balloon.id)
+      expect(bounds).not.toBeNull()
+      
+      const cssLeft = bounds!.x * canvasInfo!.scale + canvasInfo!.left
+      const cssTop = bounds!.y * canvasInfo!.scale + canvasInfo!.top
+      const cssRight = (bounds!.x + bounds!.width) * canvasInfo!.scale + canvasInfo!.left
+      const cssBottom = (bounds!.y + bounds!.height) * canvasInfo!.scale + canvasInfo!.top
+      
+      // All edges must be within canvas
+      expect(cssLeft).toBeGreaterThanOrEqual(canvasInfo!.left)
+      expect(cssTop).toBeGreaterThanOrEqual(canvasInfo!.top)
+      expect(cssRight).toBeLessThanOrEqual(canvasInfo!.left + canvasInfo!.width)
+      expect(cssBottom).toBeLessThanOrEqual(canvasInfo!.top + canvasInfo!.height)
+    }
   })
 
   test('Settings button must be at least 64×64 CSS pixels on desktop (spec §3)', async ({ page }) => {
-    // If settings button exists, it should meet size requirements
+    // Settings button must exist and meet size requirements
     const settingsButton = page.locator('[data-testid="button-settings"]')
+    await expect(settingsButton).toBeVisible({ timeout: 5000 })
     
-    if (await settingsButton.count() > 0) {
-      const box = await settingsButton.boundingBox()
-      if (box) {
-        expect(box.width).toBeGreaterThanOrEqual(64)
-        expect(box.height).toBeGreaterThanOrEqual(64)
-      }
-    }
+    const box = await settingsButton.boundingBox()
+    expect(box).not.toBeNull()
+    expect(box!.width).toBeGreaterThanOrEqual(64)
+    expect(box!.height).toBeGreaterThanOrEqual(64)
   })
 })
 
@@ -329,19 +367,19 @@ test.describe('Responsive CSS Sizes - Scale Factor Edge Cases', () => {
     })
     
     // At 320px width, scale would be 320/800 = 0.4
-    // Formula at 28px game would be 11.2 CSS px (FAILS)
-    // Formula at 32px game would be 12.8 CSS px (FAILS)
-    // Formula must be at least 80px game to get 32 CSS px
-    // OR canvas must not scale below certain threshold
+    // This is the critical test: elements must still meet minimums
     
     const gameFontSize = await page.evaluate(() => window.__tatematika!.getFormulaFontSize())
     const cssFontSize = gameFontSize * scale
     
     expect(cssFontSize).toBeGreaterThanOrEqual(32)
     
-    // Balloons: 80px game * 0.4 = 32 CSS px (FAILS for ≥64)
-    const balloonDiameter = 80
-    const cssDiameter = balloonDiameter * scale
+    const state = await page.evaluate(() => window.__tatematika!.getGameState())
+    const firstBalloon = state.balloons[0]
+    const balloonBounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), firstBalloon.id)
+    expect(balloonBounds).not.toBeNull()
+    
+    const cssDiameter = Math.max(balloonBounds!.width, balloonBounds!.height) * scale
     
     expect(cssDiameter).toBeGreaterThanOrEqual(64)
   })
@@ -366,7 +404,6 @@ test.describe('Responsive CSS Sizes - Scale Factor Edge Cases', () => {
       return {
         scale,
         formulaCssPx: gameFontSize * scale,
-        balloonCssPx: 80 * scale,
         muteButtonCssPx: {
           width: muteBounds.width * scale,
           height: muteBounds.height * scale
@@ -376,8 +413,16 @@ test.describe('Responsive CSS Sizes - Scale Factor Edge Cases', () => {
     
     expect(measurements).not.toBeNull()
     expect(measurements!.formulaCssPx).toBeGreaterThanOrEqual(32)
-    expect(measurements!.balloonCssPx).toBeGreaterThanOrEqual(64)
     expect(measurements!.muteButtonCssPx.width).toBeGreaterThanOrEqual(64)
     expect(measurements!.muteButtonCssPx.height).toBeGreaterThanOrEqual(64)
+    
+    // Also check balloons
+    const state = await page.evaluate(() => window.__tatematika!.getGameState())
+    const firstBalloon = state.balloons[0]
+    const balloonBounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), firstBalloon.id)
+    expect(balloonBounds).not.toBeNull()
+    
+    const cssDiameter = Math.max(balloonBounds!.width, balloonBounds!.height) * measurements!.scale
+    expect(cssDiameter).toBeGreaterThanOrEqual(64)
   })
 })
