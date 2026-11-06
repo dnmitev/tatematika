@@ -86,7 +86,7 @@
 
 ---
 
-### ❌ `getBalloonBounds()` - HARDCODED ELLIPSE
+### ❌ `getBalloonBounds()` - HARDCODED ELLIPSE (reports HIT AREA, not PAINTED size)
 
 **Implementation**: Returns hardcoded ellipse (lines 716–728)
 
@@ -101,24 +101,28 @@ return {
 }
 ```
 
-**What it reports**: 240×160 game-space pixels
+**What it reports**: 240×160 game-space pixels (the **hit area** dimensions)
 
 **What actually renders**:
-- Balloon Graphics created with `drawBalloon(sprite, 0, 0, balloon.isCorrect, balloonRadius)` where `balloonRadius = 80`
-- Hit area: `new Phaser.Geom.Ellipse(0, 0, balloonRadius * 1.5 * 2, balloonRadius * 2)` (line 269)
-- Ellipse constructor: `Ellipse(x, y, width, height)` where width/height are full diameters
-- Hit area dimensions: **240×160** game-space pixels
-- At 320×568: **96×64 CSS px** (240×160 × 0.4)
-- At 375×667: **112.5×75 CSS px** (240×160 × 0.46875)
+- Hit area: `new Phaser.Geom.Ellipse(0, 0, balloonRadius * 1.5 * 2, balloonRadius * 2)` creates 240×160 interactive region
+- **Painted ellipse**: `graphics.fillEllipse(x, y, radiusX, radiusY)` where `radiusX = 120, radiusY = 80`
+- **BUG**: Phaser 3's `fillEllipse(x, y, width, height)` takes WIDTH and HEIGHT, not radii
+- So the painted ellipse is actually **120×80 game-space pixels**, half the intended size
+- At 320×568: Painted **44×30 CSS px**, Hit area **96×64 CSS px**
+- At 375×667: Painted **91×67 CSS px**, Hit area **112.5×75 CSS px**
+- At 1280×800: Painted **153×102 CSS px**, Hit area **320×213 CSS px**
 
-**Discrepancy**: Hook returns hardcoded values matching implementation. Works but doesn't read the live hit area.
+**Discrepancy**: Hook returns hit area (240×160), but painted balloon is only 120×80. The painted size is ~48% of the hit area, creating a large mismatch between what the child sees and what they can tap.
 
 **Tests affected**:
 - `tests/e2e/responsive-css-sizes.spec.ts`: Lines 73–78, 138–145, 269–274, 328–335, 381–386, 424–428
 - `tests/e2e/review-findings.spec.ts`: Lines 50, 98, 193, 240
 - `tests/e2e/helpers.ts`: Line 23
+- `tests/e2e/real-geometry.spec.ts`: Measured hit area only, missed the painted bug
 
-**Result**: Tests **pass** (balloons meet 64×64 minimum), but test relies on hardcoded hook not reality.
+**Result**: Tests **passed** by measuring the hit area (96×64 CSS px at 320×568), completely missing that the painted balloon is only 44×30 CSS px. The child sees a small balloon but can tap a much larger invisible region around it.
+
+**Why previous tests passed**: `real-geometry.spec.ts` measured `sprite.input.hitArea` dimensions, not the actual painted pixels. The painted ellipse bug was invisible to hook-based and hit-area-based tests.
 
 ---
 
@@ -250,3 +254,114 @@ const text = this.add.text(0, 0, balloon.formula.display, {
 - **Not test defects**: Measurements are accurate, problem is in `src/scenes/GameScene.ts`
 
 **Action**: tate-dev must fix formula text sizing in GameScene to meet spec minimums.
+
+---
+
+## Follow-Up: Painted Balloon Geometry (b4caf34 → current)
+
+### The Painted vs Hit Area Bug
+
+**Problem reported**: `drawBalloon` in `src/scenes/GameScene.ts` calls `graphics.fillEllipse(x, y, radiusX, radiusY)` where `radiusX = 120` and `radiusY = 80`. Phaser 3's `fillEllipse` signature is `fillEllipse(x, y, width, height)`, NOT radii. So the painted balloon is only **120×80 game px** instead of the intended **240×160 game px**.
+
+**Why `real-geometry.spec.ts` missed it**: Those tests measured `sprite.input.hitArea` dimensions (the Phaser Ellipse object), not the actual painted pixels. The hit area is correctly 240×160, but the visual balloon is half that size.
+
+### Painted Geometry Tests (new suite)
+
+`tests/e2e/painted-geometry.spec.ts` uses pixel measurement to find the actual painted balloon:
+
+**Method**:
+1. Screenshot the canvas region around each balloon center
+2. Decode PNG with `pngjs`
+3. Find the most common non-background color (the balloon fill)
+4. Measure its bounding box in CSS pixels
+5. Compare to hit area and check spec minimums
+
+**Results** (measured painted balloon in CSS px):
+
+| Viewport | Painted | Hit Area | % of Hit Area | Spec ≥64 |
+|----------|---------|----------|---------------|----------|
+| 320×568  | 44×30   | 96×64    | 46%×47%       | ❌ FAIL  |
+| 375×667  | 91×67   | 112.5×75 | 81%×89%       | ❌ FAIL (ratio) |
+| 1280×800 | 153×102 | 320×213  | 48%×48%       | ✅ PASS (but ratio FAILS) |
+
+**Findings**:
+- Painted balloon is consistently **~48%** of the hit area (exactly half in width, as expected from the width/radius bug)
+- At 320×568: Painted **44×30 CSS px** violates spec §3 (≥64×64 required)
+- At 375×667: Painted **91×67 CSS px** marginally meets width but fails ratio test
+- At 1280×800: Painted **153×102 CSS px** meets ≥64 minimum but is still half the hit area
+
+**Formula text overflow**:
+- Formula text is **157×56 game px**
+- Painted ellipse is **120×80 game px**
+- Text width (157) > ellipse width (120), so formula overflows the visible balloon
+- All 4 corners of the text bounds fail the ellipse containment test
+
+**Root cause**: `drawBalloon` at `src/scenes/GameScene.ts` line ~295–305:
+```typescript
+const radiusX = radius * 1.5  // 120
+const radiusY = radius         // 80
+// ...
+graphics.fillEllipse(x, y, radiusX, radiusY)  // BUG: should be width, height
+```
+
+Should be:
+```typescript
+graphics.fillEllipse(x, y, radiusX * 2, radiusY * 2)  // width, height = 240, 160
+```
+
+Or better, use correct Phaser API:
+```typescript
+graphics.fillEllipse(x, y, radiusX * 2, radiusY * 2)
+graphics.strokeEllipse(x, y, radiusX * 2, radiusY * 2)
+```
+
+**Impact**:
+- Children see a small balloon (44–153 CSS px) but can tap a much larger invisible region (96–320 CSS px)
+- Confusing UX: tap targets don't match visual size
+- Formula text overflows the visible balloon
+- Spec §3 violation at small viewports (320×568)
+
+**Tests added**:
+- `tests/e2e/painted-geometry.spec.ts` — 4 tests measuring actual painted pixels
+- All 4 tests currently **FAIL**, correctly detecting the bug
+
+---
+
+## Updated Recommendations
+
+### For tate-dev (App Fixes) — PRIORITY ORDER
+
+1. **CRITICAL: Fix `fillEllipse` parameters** in `drawBalloon()`:
+   - Change `fillEllipse(x, y, radiusX, radiusY)` to `fillEllipse(x, y, radiusX * 2, radiusY * 2)`
+   - Same for `strokeEllipse` if present
+   - This will make painted balloon match hit area (240×160 game px)
+
+2. **HIGH: Fix formula text sizing** (original finding):
+   - Remove or increase the `Math.min(this.formulaFontSize, 52)` cap
+   - Or ensure formula always fits inside the 240×160 painted ellipse after fix #1
+
+3. **MEDIUM: Update hooks to read live objects**:
+   - Replace hardcoded constants in `getMuteButtonBounds()` and `getBalloonBounds()`
+   - `getFormulaFontSize()` and `getTargetFontSize()` should return actual text bounds height
+
+### Why Pixel Measurement Was Necessary
+
+**Hook-based tests** (`responsive-css-sizes.spec.ts`):
+- Measured self-reported values from hooks
+- Hooks returned calculated or hardcoded dimensions
+- Completely missed the painted vs hit area gap
+
+**Hit-area-based tests** (`real-geometry.spec.ts` original):
+- Measured Phaser object dimensions (hit areas, text bounds)
+- Hit areas are correct (240×160), so tests passed
+- Never looked at actual painted pixels
+
+**Pixel-based tests** (`painted-geometry.spec.ts` new):
+- Screenshot and decode PNG to measure real rendered pixels
+- Found painted balloon is half the hit area size
+- Detected the fillEllipse width/height vs radius bug
+
+**Conclusion**: All three test types are needed:
+- Hooks: Fast unit-like checks for basic size policies
+- Object inspection: Verify Phaser objects are configured correctly
+- Pixel measurement: Catch rendering bugs where configured ≠ painted
