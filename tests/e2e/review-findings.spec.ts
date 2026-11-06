@@ -89,10 +89,18 @@ test.describe('Review Findings - Regression Tests', () => {
     
     // Cat should have jumped
     const finalJumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    expect(finalJumpState.isJumping).toBe(true) // Currently jumping
-    // OR check that cat y moved above resting y at some point
+    // Check that cat jumped (either still jumping or moved above resting y)
     const catMovedUp = finalCatPos.y < initialJumpState.restingY
     expect(finalJumpState.isJumping || catMovedUp).toBe(true)
+  })
+})
+
+test.describe('Review Findings - Touch Input', () => {
+  test.use({ hasTouch: true })
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
   })
 
   test('Finding 2b: К8 - Touch must move cat under balloon and make it jump (spec §3)', async ({ page }) => {
@@ -148,6 +156,13 @@ test.describe('Review Findings - Regression Tests', () => {
     const catMovedUp = finalCatPos.y < initialJumpState.restingY
     expect(finalJumpState.isJumping || catMovedUp).toBe(true)
   })
+})
+
+test.describe('Review Findings - Keyboard Input', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+  })
 
   test('Finding 2c: К8 - Keyboard arrow keys and space must move cat and make it jump', async ({ page }) => {
     // К8: "стрелките и интервала"
@@ -182,6 +197,13 @@ test.describe('Review Findings - Regression Tests', () => {
     
     const jumpState2 = await page.evaluate(() => window.__tatematika!.getCatJumpState())
     expect(jumpState2.isJumping).toBe(true)
+  })
+})
+
+test.describe('Review Findings - Other Tests', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
   })
 
   test('Finding 3: К3 - Correct pop must play "пук" sound (spec §7)', async ({ page }) => {
