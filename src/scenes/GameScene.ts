@@ -344,9 +344,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private playSound(soundName: string) {
-    if (this.isMuted) return
-    
     this.lastPlayedSound = soundName
+    
+    if (this.isMuted) return
     
     const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
     const oscillator = audioContext.createOscillator()
@@ -469,30 +469,28 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number) {
-    if (!this.catIsJumping && this.pendingJumpBalloonId) {
-      if (Math.abs(this.catX - this.catTargetX) > 2) {
-        const distance = this.catTargetX - this.catX
-        const moveSpeed = Math.min(Math.abs(distance), 20)
-        
-        if (this.catX < this.catTargetX) {
-          this.catX += moveSpeed
-          if (this.catX > this.catTargetX) this.catX = this.catTargetX
-        } else {
-          this.catX -= moveSpeed
-          if (this.catX < this.catTargetX) this.catX = this.catTargetX
-        }
-        this.drawCat(this.cat, this.catX, this.catY)
-        
-        if (Math.abs(this.catX - this.catTargetX) <= 2) {
-          const balloonId = this.pendingJumpBalloonId
-          this.pendingJumpBalloonId = null
-          this.jumpToBalloon(balloonId)
-        }
+    if (!this.catIsJumping && Math.abs(this.catX - this.catTargetX) > 2) {
+      const distance = this.catTargetX - this.catX
+      const moveSpeed = Math.min(Math.abs(distance), 20)
+      
+      if (this.catX < this.catTargetX) {
+        this.catX += moveSpeed
+        if (this.catX > this.catTargetX) this.catX = this.catTargetX
       } else {
+        this.catX -= moveSpeed
+        if (this.catX < this.catTargetX) this.catX = this.catTargetX
+      }
+      this.drawCat(this.cat, this.catX, this.catY)
+      
+      if (this.pendingJumpBalloonId && Math.abs(this.catX - this.catTargetX) <= 2) {
         const balloonId = this.pendingJumpBalloonId
         this.pendingJumpBalloonId = null
         this.jumpToBalloon(balloonId)
       }
+    } else if (!this.catIsJumping && this.pendingJumpBalloonId) {
+      const balloonId = this.pendingJumpBalloonId
+      this.pendingJumpBalloonId = null
+      this.jumpToBalloon(balloonId)
     }
     
     if (this.catIsJumping) {
