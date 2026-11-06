@@ -53,7 +53,7 @@ export class GameScene extends Phaser.Scene {
 
   private createCat() {
     this.cat = this.add.graphics()
-    this.drawCat(this.cat, this.catX, 480)
+    this.drawCat(this.cat, this.catX, 460)
   }
 
   private drawCat(graphics: Phaser.GameObjects.Graphics, x: number, y: number) {
@@ -80,47 +80,47 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createUI() {
-    this.add.text(400, 25, 'Котето и балоните', {
-      fontSize: '28px',
+    this.add.text(400, 20, 'Котето и балоните', {
+      fontSize: '24px',
       color: '#FF1493',
       fontStyle: 'bold'
     }).setOrigin(0.5)
 
-    this.add.text(20, 560, 'Цел:', {
-      fontSize: '24px',
+    this.add.text(15, 530, 'Цел:', {
+      fontSize: '20px',
       color: '#000000',
       fontStyle: 'bold'
     })
 
-    this.targetText = this.add.text(100, 560, '', {
-      fontSize: '40px',
+    this.targetText = this.add.text(75, 525, '', {
+      fontSize: '32px',
       color: '#000000',
       fontStyle: 'bold',
       backgroundColor: '#FFEB3B',
-      padding: { x: 15, y: 8 }
+      padding: { x: 12, y: 6 }
     })
 
-    this.starsText = this.add.text(20, 60, '', {
-      fontSize: '28px',
+    this.starsText = this.add.text(15, 50, '', {
+      fontSize: '24px',
       color: '#FFD700',
       fontStyle: 'bold'
     })
 
-    this.wrongAttemptsText = this.add.text(650, 560, '', {
-      fontSize: '22px',
+    this.wrongAttemptsText = this.add.text(600, 530, '', {
+      fontSize: '18px',
       color: '#555555'
     })
 
-    this.feedbackText = this.add.text(400, 400, '', {
-      fontSize: '36px',
+    this.feedbackText = this.add.text(400, 300, '', {
+      fontSize: '32px',
       color: '#FF1493',
       fontStyle: 'bold',
       backgroundColor: '#FFFFFF',
-      padding: { x: 15, y: 8 }
+      padding: { x: 12, y: 6 }
     }).setOrigin(0.5).setVisible(false)
 
-    this.muteButton = this.add.text(750, 20, '🔊', {
-      fontSize: '32px'
+    this.muteButton = this.add.text(760, 15, '🔊', {
+      fontSize: '28px'
     }).setInteractive({ useHandCursor: true })
       .on('pointerdown', () => this.toggleMute())
 
@@ -140,23 +140,27 @@ export class GameScene extends Phaser.Scene {
     })
     this.balloonSprites = []
 
-    const spacing = 800 / (this.gameState.round.balloons.length + 1)
+    const balloonRadius = 40
+    const safeMargin = 60
+    const availableWidth = 800 - (2 * safeMargin)
+    const count = this.gameState.round.balloons.length
+    const spacing = availableWidth / count
     
     this.gameState.round.balloons.forEach((balloon, index) => {
-      const x = spacing * (index + 1)
-      const y = 100 + index * 30
+      const x = safeMargin + spacing * (index + 0.5)
+      const y = 110 + (index % 3) * 25
 
       const sprite = this.add.graphics()
       this.drawBalloon(sprite, 0, 0, balloon.isCorrect)
       sprite.setPosition(x, y)
       sprite.setInteractive(
-        new Phaser.Geom.Circle(0, 0, 45),
+        new Phaser.Geom.Circle(0, 0, balloonRadius),
         Phaser.Geom.Circle.Contains
       )
       sprite.on('pointerdown', () => this.handleBalloonClick(balloon.id))
 
       const text = this.add.text(0, 0, balloon.formula.display, {
-        fontSize: '28px',
+        fontSize: '24px',
         color: '#000000',
         fontStyle: 'bold'
       }).setOrigin(0.5)
@@ -176,19 +180,20 @@ export class GameScene extends Phaser.Scene {
   private drawBalloon(graphics: Phaser.GameObjects.Graphics, x: number, y: number, isCorrect: boolean) {
     const colors = [0xFF6B6B, 0xFFD93D, 0x6BCB77, 0x4D96FF, 0xA78BFA]
     const color = colors[Math.floor(Math.random() * colors.length)]
+    const radius = 40
     
     graphics.fillStyle(color, 0.9)
-    graphics.fillCircle(x, y, 45)
+    graphics.fillCircle(x, y, radius)
     graphics.lineStyle(3, 0x000000, 0.4)
-    graphics.strokeCircle(x, y, 45)
+    graphics.strokeCircle(x, y, radius)
     
     graphics.fillStyle(0xFFFFFF, 0.3)
-    graphics.fillCircle(x - 12, y - 12, 8)
+    graphics.fillCircle(x - 10, y - 10, 8)
     
     graphics.lineStyle(2, 0x000000, 0.5)
     graphics.beginPath()
-    graphics.moveTo(x, y + 45)
-    graphics.lineTo(x, y + 70)
+    graphics.moveTo(x, y + radius)
+    graphics.lineTo(x, y + radius + 20)
     graphics.strokePath()
   }
 
@@ -255,8 +260,8 @@ export class GameScene extends Phaser.Scene {
 
   private moveCat(direction: number) {
     this.catX += direction * 100
-    this.catX = Phaser.Math.Clamp(this.catX, 50, 750)
-    this.drawCat(this.cat, this.catX, 480)
+    this.catX = Phaser.Math.Clamp(this.catX, 60, 740)
+    this.drawCat(this.cat, this.catX, 460)
   }
 
   private jump() {
@@ -293,7 +298,7 @@ export class GameScene extends Phaser.Scene {
         bs.sprite.alpha = 1
       }
 
-      if (bs.y > 430) {
+      if (bs.y > 400) {
         this.gameState.round = resetBalloons(this.gameState.round)
         this.createBalloons()
       }

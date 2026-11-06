@@ -33,14 +33,20 @@ declare global {
   }
 }
 
-// Phaser config
+// Phaser config with responsive scaling
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   width: 800,
   height: 600,
   parent: 'game-container',
   scene: [GameScene, LevelCompleteScene],
-  backgroundColor: '#87CEEB'
+  backgroundColor: '#87CEEB',
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    width: 800,
+    height: 600
+  }
 }
 
 // Initialize the game
