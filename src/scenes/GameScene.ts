@@ -105,6 +105,14 @@ export class GameScene extends Phaser.Scene {
       this.settingsButton.remove()
     }
     
+    if (this.settingsUI) {
+      this.settingsUI.destroy()
+    }
+    
+    if (this.levelCompleteUI) {
+      this.levelCompleteUI.destroy()
+    }
+    
     this.calculateFontSizes()
     this.children.removeAll(true)
     
