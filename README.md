@@ -147,20 +147,21 @@ interface TatematikaTestHook {
 
 ### CSS Pixel Sizing Convention
 
-The game uses Phaser's `Scale.FIT` mode with a base game size of 800×600 game-space pixels, scaled to fit the viewport. To convert game-space measurements to CSS pixels (actual on-screen size):
+The game uses dynamic viewport-sized canvas dimensions (e.g., 320×568 portrait on mobile, 1280×800 on desktop). To convert game-space measurements to CSS pixels (actual on-screen size):
 
 ```typescript
 const canvas = document.querySelector('canvas')!
 const rect = canvas.getBoundingClientRect()
+const game = window.__tatematika!.getGame()
 
-// For games with fixed dimensions (800×600):
+// ALWAYS use live game.scale dimensions, never hardcoded values:
 const scale = rect.width / game.scale.width  // or rect.height / game.scale.height
 
 // Convert any game-space measurement to CSS pixels:
 const cssPx = gamePx * scale
 ```
 
-**Important**: Use `game.scale.width` and `game.scale.height` (the actual game dimensions) rather than hardcoded 800 or 600. This ensures tests work correctly even if the game uses responsive portrait layouts or other resize modes.
+**Important**: All tests MUST use `game.scale.width` and `game.scale.height` (the actual live game dimensions) rather than hardcoded constants like 800 or 600. The game adapts to viewport size, so these values change per device. A shared helper `getGameScaleAndRect(page)` is provided in `tests/e2e/helpers.ts`.
 
 **Spec minimums in CSS pixels:**
 - Text (formulas, target number): ≥32 CSS px (spec §7)

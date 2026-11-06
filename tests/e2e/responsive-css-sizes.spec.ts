@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { popCorrectBalloonAndWait } from './helpers'
+import { popCorrectBalloonAndWait, getGameScaleAndRect } from './helpers'
 
 /**
  * Responsive CSS pixel size tests
@@ -22,15 +22,7 @@ test.describe('Responsive CSS Sizes - Mobile 375×667', () => {
   })
 
   test('Formula digits must be at least 32 CSS pixels on mobile (spec §7)', async ({ page }) => {
-    // Get canvas scale factor
-    const scale = await page.evaluate(() => {
-      const canvas = document.querySelector('canvas')
-      if (!canvas) return 0
-      
-      const rect = canvas.getBoundingClientRect()
-      // Game space is 800×600, calculate scale from actual CSS size
-      return rect.width / 800
-    })
+    const { scale } = await getGameScaleAndRect(page)
     
     // Get formula font size from game (Phaser game-space pixels)
     const gameFontSize = await page.evaluate(() => window.__tatematika!.getFormulaFontSize())
@@ -42,13 +34,7 @@ test.describe('Responsive CSS Sizes - Mobile 375×667', () => {
   })
 
   test('Target number digits must be at least 32 CSS pixels on mobile (spec §7)', async ({ page }) => {
-    // The target number should also be ≥32 CSS px
-    const scale = await page.evaluate(() => {
-      const canvas = document.querySelector('canvas')
-      if (!canvas) return 0
-      const rect = canvas.getBoundingClientRect()
-      return rect.width / 800
-    })
+    const { scale } = await getGameScaleAndRect(page)
     
     // Get target font size through hook
     const targetFontSize = await page.evaluate(() => window.__tatematika!.getTargetFontSize())
@@ -59,12 +45,7 @@ test.describe('Responsive CSS Sizes - Mobile 375×667', () => {
   })
 
   test('Balloons must be at least 64×64 CSS pixels on mobile (spec §3)', async ({ page }) => {
-    const scale = await page.evaluate(() => {
-      const canvas = document.querySelector('canvas')
-      if (!canvas) return 0
-      const rect = canvas.getBoundingClientRect()
-      return rect.width / 800
-    })
+    const { scale } = await getGameScaleAndRect(page)
     
     // Get real balloon bounds from hook
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
@@ -79,12 +60,7 @@ test.describe('Responsive CSS Sizes - Mobile 375×667', () => {
   })
 
   test('Mute button must be at least 64×64 CSS pixels on mobile (spec §3)', async ({ page }) => {
-    const scale = await page.evaluate(() => {
-      const canvas = document.querySelector('canvas')
-      if (!canvas) return 0
-      const rect = canvas.getBoundingClientRect()
-      return rect.width / 800
-    })
+    const { scale } = await getGameScaleAndRect(page)
     
     const bounds = await page.evaluate(() => window.__tatematika!.getMuteButtonBounds())
     
@@ -113,21 +89,7 @@ test.describe('Responsive CSS Sizes - Mobile 375×667', () => {
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
     expect(state.balloons).toHaveLength(5)
     
-    // Get canvas bounds and scale
-    const canvasInfo = await page.evaluate(() => {
-      const canvas = document.querySelector('canvas')
-      if (!canvas) return null
-      const rect = canvas.getBoundingClientRect()
-      return {
-        width: rect.width,
-        height: rect.height,
-        left: rect.left,
-        top: rect.top,
-        scale: rect.width / 800
-      }
-    })
-    
-    expect(canvasInfo).not.toBeNull()
+    const { canvasRect, scale } = await getGameScaleAndRect(page)
     
     // Get viewport size
     const viewportHeight = 667
@@ -139,10 +101,10 @@ test.describe('Responsive CSS Sizes - Mobile 375×667', () => {
       expect(bounds).not.toBeNull()
       
       // Convert to CSS pixels
-      const cssLeft = bounds!.x * canvasInfo!.scale + canvasInfo!.left
-      const cssTop = bounds!.y * canvasInfo!.scale + canvasInfo!.top
-      const cssRight = (bounds!.x + bounds!.width) * canvasInfo!.scale + canvasInfo!.left
-      const cssBottom = (bounds!.y + bounds!.height) * canvasInfo!.scale + canvasInfo!.top
+      const cssLeft = bounds!.x * scale + canvasRect.left
+      const cssTop = bounds!.y * scale + canvasRect.top
+      const cssRight = (bounds!.x + bounds!.width) * scale + canvasRect.left
+      const cssBottom = (bounds!.y + bounds!.height) * scale + canvasRect.top
       
       // All edges must be within viewport
       expect(cssLeft).toBeGreaterThanOrEqual(0)
@@ -203,12 +165,7 @@ test.describe('Responsive CSS Sizes - Mobile 375×667', () => {
     await page.reload()
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
     
-    const scale = await page.evaluate(() => {
-      const canvas = document.querySelector('canvas')
-      if (!canvas) return 0
-      const rect = canvas.getBoundingClientRect()
-      return rect.width / 800
-    })
+    const { scale } = await getGameScaleAndRect(page)
     
     const gameFontSize = await page.evaluate(() => window.__tatematika!.getFormulaFontSize())
     const cssFontSize = gameFontSize * scale
@@ -227,12 +184,7 @@ test.describe('Responsive CSS Sizes - Desktop 1920×1080', () => {
   })
 
   test('Formula digits must be at least 32 CSS pixels on desktop (spec §7)', async ({ page }) => {
-    const scale = await page.evaluate(() => {
-      const canvas = document.querySelector('canvas')
-      if (!canvas) return 0
-      const rect = canvas.getBoundingClientRect()
-      return rect.width / 800
-    })
+    const { scale } = await getGameScaleAndRect(page)
     
     const gameFontSize = await page.evaluate(() => window.__tatematika!.getFormulaFontSize())
     const cssFontSize = gameFontSize * scale
@@ -241,12 +193,7 @@ test.describe('Responsive CSS Sizes - Desktop 1920×1080', () => {
   })
 
   test('Target number digits must be at least 32 CSS pixels on desktop (spec §7)', async ({ page }) => {
-    const scale = await page.evaluate(() => {
-      const canvas = document.querySelector('canvas')
-      if (!canvas) return 0
-      const rect = canvas.getBoundingClientRect()
-      return rect.width / 800
-    })
+    const { scale } = await getGameScaleAndRect(page)
     
     const targetFontSize = await page.evaluate(() => window.__tatematika!.getTargetFontSize())
     
@@ -256,12 +203,7 @@ test.describe('Responsive CSS Sizes - Desktop 1920×1080', () => {
   })
 
   test('Balloons must be at least 64×64 CSS pixels on desktop (spec §3)', async ({ page }) => {
-    const scale = await page.evaluate(() => {
-      const canvas = document.querySelector('canvas')
-      if (!canvas) return 0
-      const rect = canvas.getBoundingClientRect()
-      return rect.width / 800
-    })
+    const { scale } = await getGameScaleAndRect(page)
     
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
     const firstBalloon = state.balloons[0]
@@ -275,12 +217,7 @@ test.describe('Responsive CSS Sizes - Desktop 1920×1080', () => {
   })
 
   test('Mute button must be at least 64×64 CSS pixels on desktop (spec §3)', async ({ page }) => {
-    const scale = await page.evaluate(() => {
-      const canvas = document.querySelector('canvas')
-      if (!canvas) return 0
-      const rect = canvas.getBoundingClientRect()
-      return rect.width / 800
-    })
+    const { scale } = await getGameScaleAndRect(page)
     
     const bounds = await page.evaluate(() => window.__tatematika!.getMuteButtonBounds())
     
@@ -308,36 +245,23 @@ test.describe('Responsive CSS Sizes - Desktop 1920×1080', () => {
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
     expect(state.balloons).toHaveLength(5)
     
-    const canvasInfo = await page.evaluate(() => {
-      const canvas = document.querySelector('canvas')
-      if (!canvas) return null
-      const rect = canvas.getBoundingClientRect()
-      return {
-        width: rect.width,
-        height: rect.height,
-        left: rect.left,
-        top: rect.top,
-        scale: rect.width / 800
-      }
-    })
-    
-    expect(canvasInfo).not.toBeNull()
+    const { canvasRect, scale } = await getGameScaleAndRect(page)
     
     // Check each balloon is fully within canvas
     for (const balloon of state.balloons) {
       const bounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), balloon.id)
       expect(bounds).not.toBeNull()
       
-      const cssLeft = bounds!.x * canvasInfo!.scale + canvasInfo!.left
-      const cssTop = bounds!.y * canvasInfo!.scale + canvasInfo!.top
-      const cssRight = (bounds!.x + bounds!.width) * canvasInfo!.scale + canvasInfo!.left
-      const cssBottom = (bounds!.y + bounds!.height) * canvasInfo!.scale + canvasInfo!.top
+      const cssLeft = bounds!.x * scale + canvasRect.left
+      const cssTop = bounds!.y * scale + canvasRect.top
+      const cssRight = (bounds!.x + bounds!.width) * scale + canvasRect.left
+      const cssBottom = (bounds!.y + bounds!.height) * scale + canvasRect.top
       
       // All edges must be within canvas
-      expect(cssLeft).toBeGreaterThanOrEqual(canvasInfo!.left)
-      expect(cssTop).toBeGreaterThanOrEqual(canvasInfo!.top)
-      expect(cssRight).toBeLessThanOrEqual(canvasInfo!.left + canvasInfo!.width)
-      expect(cssBottom).toBeLessThanOrEqual(canvasInfo!.top + canvasInfo!.height)
+      expect(cssLeft).toBeGreaterThanOrEqual(canvasRect.left)
+      expect(cssTop).toBeGreaterThanOrEqual(canvasRect.top)
+      expect(cssRight).toBeLessThanOrEqual(canvasRect.left + canvasRect.width)
+      expect(cssBottom).toBeLessThanOrEqual(canvasRect.top + canvasRect.height)
     }
   })
 
@@ -361,15 +285,9 @@ test.describe('Responsive CSS Sizes - Scale Factor Edge Cases', () => {
     await page.goto('/')
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
     
-    const scale = await page.evaluate(() => {
-      const canvas = document.querySelector('canvas')
-      if (!canvas) return 0
-      const rect = canvas.getBoundingClientRect()
-      return rect.width / 800
-    })
+    const { scale } = await getGameScaleAndRect(page)
     
-    // At 320px width, scale would be 320/800 = 0.4
-    // This is the critical test: elements must still meet minimums
+    // This is the critical test: elements must still meet minimums at small viewport
     
     const gameFontSize = await page.evaluate(() => window.__tatematika!.getFormulaFontSize())
     const cssFontSize = gameFontSize * scale
@@ -393,30 +311,20 @@ test.describe('Responsive CSS Sizes - Scale Factor Edge Cases', () => {
     await page.goto('/')
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
     
-    const measurements = await page.evaluate(() => {
-      const canvas = document.querySelector('canvas')
-      if (!canvas) return null
-      
-      const rect = canvas.getBoundingClientRect()
-      const scale = rect.width / 800
-      
-      const gameFontSize = window.__tatematika!.getFormulaFontSize()
-      const muteBounds = window.__tatematika!.getMuteButtonBounds()
-      
-      return {
-        scale,
-        formulaCssPx: gameFontSize * scale,
-        muteButtonCssPx: {
-          width: muteBounds.width * scale,
-          height: muteBounds.height * scale
-        }
-      }
-    })
+    const { scale } = await getGameScaleAndRect(page)
     
-    expect(measurements).not.toBeNull()
-    expect(measurements!.formulaCssPx).toBeGreaterThanOrEqual(32)
-    expect(measurements!.muteButtonCssPx.width).toBeGreaterThanOrEqual(64)
-    expect(measurements!.muteButtonCssPx.height).toBeGreaterThanOrEqual(64)
+    const gameFontSize = await page.evaluate(() => window.__tatematika!.getFormulaFontSize())
+    const muteBounds = await page.evaluate(() => window.__tatematika!.getMuteButtonBounds())
+    
+    const formulaCssPx = gameFontSize * scale
+    const muteButtonCssPx = {
+      width: muteBounds.width * scale,
+      height: muteBounds.height * scale
+    }
+    
+    expect(formulaCssPx).toBeGreaterThanOrEqual(32)
+    expect(muteButtonCssPx.width).toBeGreaterThanOrEqual(64)
+    expect(muteButtonCssPx.height).toBeGreaterThanOrEqual(64)
     
     // Also check balloons
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
@@ -424,7 +332,7 @@ test.describe('Responsive CSS Sizes - Scale Factor Edge Cases', () => {
     const balloonBounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), firstBalloon.id)
     expect(balloonBounds).not.toBeNull()
     
-    const cssDiameter = Math.max(balloonBounds!.width, balloonBounds!.height) * measurements!.scale
+    const cssDiameter = Math.max(balloonBounds!.width, balloonBounds!.height) * scale
     expect(cssDiameter).toBeGreaterThanOrEqual(64)
   })
 })

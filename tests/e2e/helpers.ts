@@ -1,4 +1,38 @@
-import { expect } from '@playwright/test'
+import { expect, Page } from '@playwright/test'
+
+/**
+ * Get game scale and canvas dimensions using live game.scale.width/height
+ * Never assumes hardcoded 800×600 game dimensions
+ */
+export async function getGameScaleAndRect(page: Page): Promise<{
+  gameWidth: number
+  gameHeight: number
+  canvasRect: DOMRect
+  scale: number
+}> {
+  return await page.evaluate(() => {
+    const game = window.__tatematika!.getGame()
+    const canvas = document.querySelector('canvas')!
+    const rect = canvas.getBoundingClientRect()
+    const scale = rect.width / game.scale.width
+    
+    return {
+      gameWidth: game.scale.width,
+      gameHeight: game.scale.height,
+      canvasRect: {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        left: rect.left
+      } as DOMRect,
+      scale
+    }
+  })
+}
 
 /**
  * Helper: Wait for game to be ready, pop correct balloon, wait for new round
