@@ -177,15 +177,39 @@ test.describe('Котето и балоните - E2E', () => {
 
   test('К8: Mouse click - clicking balloon works', async ({ page }) => {
     // К8: When child clicks with mouse
+    // Wait for game to be ready before clicking
+    await expect.poll(async () => {
+      const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+      return !jumpState.isJumping
+    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
     const firstBalloon = state.balloons[0]
+    
+    // Wait for balloon to exist and not be animating
+    await expect.poll(async () => {
+      const balloonBounds = await page.evaluate((id: string) => 
+        window.__tatematika!.getBalloonBounds(id), firstBalloon.id)
+      const balloonAnim = await page.evaluate((id: string) => 
+        window.__tatematika!.getBalloonAnimationState(id), firstBalloon.id)
+      
+      return balloonBounds !== null && 
+             !balloonAnim.isPopping && 
+             !balloonAnim.isBouncing
+    }, { timeout: 5000, intervals: [50] }).toBe(true)
     
     // Then cat goes to balloon and jumps
     await page.evaluate((id) => window.__tatematika!.clickBalloon(id), firstBalloon.id)
     
-    await page.waitForTimeout(300)
+    // Wait for state to update
+    await expect.poll(async () => {
+      const newState = await page.evaluate(() => window.__tatematika!.getGameState())
+      return firstBalloon.isCorrect 
+        ? newState.stars > state.stars
+        : newState.wrongAttempts > state.wrongAttempts
+    }, { timeout: 5000, intervals: [50] }).toBe(true)
     
-    // State should update (either correct or wrong attempt)
+    // Verify final state
     const newState = await page.evaluate(() => window.__tatematika!.getGameState())
     
     if (firstBalloon.isCorrect) {
