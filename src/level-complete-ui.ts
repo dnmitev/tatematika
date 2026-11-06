@@ -132,4 +132,13 @@ export class LevelCompleteUI {
       this.container.style.display = 'none'
     }
   }
+
+  public destroy() {
+    if (this.container && this.container.parentElement) {
+      this.container.remove()
+    }
+    this.container = null
+    this.onPlayAgain = null
+    this.onToMenu = null
+  }
 }

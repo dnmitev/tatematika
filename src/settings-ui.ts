@@ -165,4 +165,12 @@ export class SettingsUI {
   public isOpen(): boolean {
     return this.panel ? this.panel.style.display === 'block' : false
   }
+
+  public destroy() {
+    if (this.panel && this.panel.parentElement) {
+      this.panel.remove()
+    }
+    this.panel = null
+    this.onClose = null
+  }
 }
