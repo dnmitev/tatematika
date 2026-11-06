@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Check for package.json
+        id: check_package
+        run: |
+          if [ -f "package.json" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "✅ package.json found - will run full CI suite"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️  package.json not found - skipping CI checks"
+            echo "This workflow will run the full test suite once the project is merged to main"
+          fi
+      
+      - name: Setup Node.js
+        if: steps.check_package.outputs.exists == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        if: steps.check_package.outputs.exists == 'true'
+        run: npm ci
+      
+      - name: Build project
+        if: steps.check_package.outputs.exists == 'true'
+        run: npm run build
+      
+      - name: Run unit tests
+        if: steps.check_package.outputs.exists == 'true'
+        run: npm test
+      
+      - name: Install Playwright browsers
+        if: steps.check_package.outputs.exists == 'true'
+        run: npx playwright install --with-deps chromium
+      
+      - name: Run E2E tests
+        if: steps.check_package.outputs.exists == 'true'
+        run: npm run e2e
+      
+      - name: Upload Playwright report
+        if: steps.check_package.outputs.exists == 'true' && failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
