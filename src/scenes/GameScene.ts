@@ -322,10 +322,8 @@ export class GameScene extends Phaser.Scene {
       this.showLevelComplete()
     } else {
       this.gameState.round = handleCorrectPop(this.gameState.round, this.gameState.settings)
-      this.time.delayedCall(800, () => {
-        this.createBalloons()
-        this.updateUI()
-      })
+      this.createBalloons()
+      this.updateUI()
     }
   }
 
