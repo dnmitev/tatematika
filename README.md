@@ -92,6 +92,7 @@ interface TatematikaTestHook {
   getMuteButtonBounds(): { width: number; height: number }
   
   // Get cat's current position in game space
+  // Returns CENTER coordinates of the cat (x: horizontal center, y: vertical center)
   // Used to verify К8: cat moves under balloon on click/touch
   getCatPosition(): { x: number; y: number }
   
@@ -101,8 +102,10 @@ interface TatematikaTestHook {
   getCatJumpState(): { isJumping: boolean; restingY: number }
   
   // Get balloon bounds in game-space pixels (includes formula text)
+  // Returns TOP-LEFT coordinates (x: left edge, y: top edge) plus width/height
   // Returns null if balloon not found
   // Used for К8 (cat moves under balloon) and responsive size tests
+  // Note: To get balloon center, use bounds.x + bounds.width/2, bounds.y + bounds.height/2
   getBalloonBounds(balloonId: string): { 
     x: number
     y: number

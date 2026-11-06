@@ -39,10 +39,15 @@ test.describe('Review Findings - Regression Tests', () => {
     // К8: "котето отива до избрания балон и скача"
     
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
-    const targetBalloon = state.balloons[0]
+    // Use a WRONG balloon so it stays on screen after click
+    const targetBalloon = state.balloons.find(b => !b.isCorrect)!
     
-    // Get balloon position in CSS pixels
-    const balloonBounds = await page.evaluate((id) => {
+    // Get balloon bounds BEFORE click (so it doesn't disappear if correct)
+    const balloonGameBounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), targetBalloon.id)
+    expect(balloonGameBounds).not.toBeNull()
+    
+    // Get balloon position in CSS pixels for clicking
+    const balloonCssBounds = await page.evaluate((id) => {
       const bounds = window.__tatematika!.getBalloonBounds(id)
       if (!bounds) return null
       
@@ -59,37 +64,50 @@ test.describe('Review Findings - Regression Tests', () => {
       }
     }, targetBalloon.id)
     
-    expect(balloonBounds).not.toBeNull()
+    expect(balloonCssBounds).not.toBeNull()
     
-    // Get initial cat position
+    // Get initial cat position and jump state
     const initialCatPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
     const initialJumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
     
-    // Click balloon using real mouse click
-    await page.mouse.click(balloonBounds!.x + balloonBounds!.width / 2, balloonBounds!.y + balloonBounds!.height / 2)
+    // Click balloon center using real mouse click
+    await page.mouse.click(
+      balloonCssBounds!.x + balloonCssBounds!.width / 2, 
+      balloonCssBounds!.y + balloonCssBounds!.height / 2
+    )
     
     // Wait for movement and jump animation
     await page.waitForTimeout(800)
     
-    // Cat should have moved to under the balloon (within balloon radius ~40px)
+    // Cat should have moved to under the balloon CENTER (within balloon radius)
     const finalCatPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
-    const balloonGameBounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), targetBalloon.id)
     
-    const horizontalDistance = Math.abs(finalCatPos.x - balloonGameBounds!.x)
-    expect(horizontalDistance).toBeLessThanOrEqual(40) // Within balloon radius
+    // Compare cat x to balloon center (bounds.x is top-left)
+    const balloonCenterX = balloonGameBounds!.x + balloonGameBounds!.width / 2
+    const horizontalDistance = Math.abs(finalCatPos.x - balloonCenterX)
+    expect(horizontalDistance).toBeLessThanOrEqual(balloonGameBounds!.width / 2) // Within balloon radius
     
-    // Cat should have jumped (y position went above resting y)
+    // Cat should have jumped
     const finalJumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    expect(finalJumpState.isJumping).toBe(true) // Or check that cat moved above resting y
+    expect(finalJumpState.isJumping).toBe(true) // Currently jumping
+    // OR check that cat y moved above resting y at some point
+    const catMovedUp = finalCatPos.y < initialJumpState.restingY
+    expect(finalJumpState.isJumping || catMovedUp).toBe(true)
   })
 
   test('Finding 2b: К8 - Touch must move cat under balloon and make it jump (spec §3)', async ({ page }) => {
     // Spec §3: "Докосване на балон: котето отива под него и скача"
     
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
-    const targetBalloon = state.balloons[1]
+    // Use a WRONG balloon so it stays on screen
+    const wrongBalloons = state.balloons.filter(b => !b.isCorrect)
+    const targetBalloon = wrongBalloons[wrongBalloons.length > 1 ? 1 : 0]
     
-    const balloonBounds = await page.evaluate((id) => {
+    // Get balloon bounds BEFORE tap
+    const balloonGameBounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), targetBalloon.id)
+    expect(balloonGameBounds).not.toBeNull()
+    
+    const balloonCssBounds = await page.evaluate((id) => {
       const bounds = window.__tatematika!.getBalloonBounds(id)
       if (!bounds) return null
       
@@ -105,20 +123,30 @@ test.describe('Review Findings - Regression Tests', () => {
       }
     }, targetBalloon.id)
     
-    expect(balloonBounds).not.toBeNull()
+    expect(balloonCssBounds).not.toBeNull()
     
     const initialCatPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
+    const initialJumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
     
-    // Tap balloon using touchscreen
-    await page.touchscreen.tap(balloonBounds!.x + balloonBounds!.width / 2, balloonBounds!.y + balloonBounds!.height / 2)
+    // Tap balloon center using touchscreen
+    await page.touchscreen.tap(
+      balloonCssBounds!.x + balloonCssBounds!.width / 2, 
+      balloonCssBounds!.y + balloonCssBounds!.height / 2
+    )
     
     await page.waitForTimeout(800)
     
     const finalCatPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
-    const balloonGameBounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), targetBalloon.id)
     
-    const horizontalDistance = Math.abs(finalCatPos.x - balloonGameBounds!.x)
-    expect(horizontalDistance).toBeLessThanOrEqual(40)
+    // Compare cat x to balloon center
+    const balloonCenterX = balloonGameBounds!.x + balloonGameBounds!.width / 2
+    const horizontalDistance = Math.abs(finalCatPos.x - balloonCenterX)
+    expect(horizontalDistance).toBeLessThanOrEqual(balloonGameBounds!.width / 2)
+    
+    // Cat should have jumped
+    const finalJumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+    const catMovedUp = finalCatPos.y < initialJumpState.restingY
+    expect(finalJumpState.isJumping || catMovedUp).toBe(true)
   })
 
   test('Finding 2c: К8 - Keyboard arrow keys and space must move cat and make it jump', async ({ page }) => {
