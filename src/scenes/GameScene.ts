@@ -119,10 +119,15 @@ export class GameScene extends Phaser.Scene {
       padding: { x: 12, y: 6 }
     }).setOrigin(0.5).setVisible(false)
 
-    this.muteButton = this.add.text(760, 15, '🔊', {
-      fontSize: '28px'
-    }).setInteractive({ useHandCursor: true })
-      .on('pointerdown', () => this.toggleMute())
+    this.muteButton = this.add.text(740, 10, '🔊', {
+      fontSize: '32px',
+      padding: { x: 16, y: 16 }
+    }).setInteractive(
+      new Phaser.Geom.Rectangle(0, 0, 64, 64),
+      Phaser.Geom.Rectangle.Contains
+    )
+    this.muteButton.input!.cursor = 'pointer'
+    this.muteButton.on('pointerdown', () => this.toggleMute())
 
     this.updateUI()
   }
@@ -160,7 +165,7 @@ export class GameScene extends Phaser.Scene {
       sprite.on('pointerdown', () => this.handleBalloonClick(balloon.id))
 
       const text = this.add.text(0, 0, balloon.formula.display, {
-        fontSize: '24px',
+        fontSize: '32px',
         color: '#000000',
         fontStyle: 'bold'
       }).setOrigin(0.5)
