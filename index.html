@@ -15,26 +15,20 @@
       width: 100vw;
       height: 100vh;
       display: flex;
-      flex-direction: column;
       justify-content: center;
       align-items: center;
     }
-    .game-title {
+    .screen-reader-only {
       position: absolute;
-      top: 10px;
-      left: 50%;
-      transform: translateX(-50%);
-      font-size: 24px;
-      color: #FF1493;
-      font-weight: bold;
-      z-index: 1000;
-      pointer-events: none;
-      opacity: 0.8;
+      left: -10000px;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
     }
   </style>
 </head>
 <body>
-  <div class="game-title">Котето и балоните</div>
+  <div class="screen-reader-only">Котето и балоните - Игра по математика</div>
   <div id="game-container"></div>
   <script type="module" src="/src/main.ts"></script>
 </body>

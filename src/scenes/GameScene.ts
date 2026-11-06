@@ -53,55 +53,62 @@ export class GameScene extends Phaser.Scene {
 
   private createCat() {
     this.cat = this.add.graphics()
-    this.drawCat(this.cat, this.catX, 520)
+    this.drawCat(this.cat, this.catX, 480)
   }
 
   private drawCat(graphics: Phaser.GameObjects.Graphics, x: number, y: number) {
     graphics.clear()
     
     graphics.fillStyle(0xFFA500, 1)
-    graphics.fillEllipse(x, y, 40, 35)
+    graphics.fillEllipse(x, y, 50, 45)
     
     graphics.fillStyle(0xFFA500, 1)
-    graphics.fillTriangle(x - 20, y - 15, x - 25, y - 30, x - 15, y - 20)
-    graphics.fillTriangle(x + 20, y - 15, x + 25, y - 30, x + 15, y - 20)
+    graphics.fillTriangle(x - 25, y - 20, x - 30, y - 40, x - 18, y - 25)
+    graphics.fillTriangle(x + 25, y - 20, x + 30, y - 40, x + 18, y - 25)
     
     graphics.fillStyle(0xFFFFFF, 1)
-    graphics.fillCircle(x - 10, y - 5, 5)
-    graphics.fillCircle(x + 10, y - 5, 5)
+    graphics.fillCircle(x - 12, y - 8, 6)
+    graphics.fillCircle(x + 12, y - 8, 6)
     graphics.fillStyle(0x000000, 1)
-    graphics.fillCircle(x - 10, y - 5, 3)
-    graphics.fillCircle(x + 10, y - 5, 3)
+    graphics.fillCircle(x - 12, y - 8, 4)
+    graphics.fillCircle(x + 12, y - 8, 4)
     
     graphics.lineStyle(2, 0x000000, 1)
     graphics.beginPath()
-    graphics.arc(x, y + 5, 8, 0, Math.PI, false)
+    graphics.arc(x, y + 8, 10, 0, Math.PI, false)
     graphics.strokePath()
   }
 
   private createUI() {
-    this.add.text(400, 30, 'Котето и балоните', {
-      fontSize: '32px',
+    this.add.text(400, 25, 'Котето и балоните', {
+      fontSize: '28px',
       color: '#FF1493',
       fontStyle: 'bold'
     }).setOrigin(0.5)
 
-    this.targetText = this.add.text(400, 550, '', {
-      fontSize: '48px',
+    this.add.text(20, 560, 'Цел:', {
+      fontSize: '24px',
       color: '#000000',
-      fontStyle: 'bold',
-      backgroundColor: '#FFFFFF',
-      padding: { x: 20, y: 10 }
-    }).setOrigin(0.5)
-
-    this.starsText = this.add.text(20, 70, '', {
-      fontSize: '28px',
-      color: '#FFD700'
+      fontStyle: 'bold'
     })
 
-    this.wrongAttemptsText = this.add.text(20, 560, '', {
-      fontSize: '24px',
-      color: '#000000'
+    this.targetText = this.add.text(100, 560, '', {
+      fontSize: '40px',
+      color: '#000000',
+      fontStyle: 'bold',
+      backgroundColor: '#FFEB3B',
+      padding: { x: 15, y: 8 }
+    })
+
+    this.starsText = this.add.text(20, 60, '', {
+      fontSize: '28px',
+      color: '#FFD700',
+      fontStyle: 'bold'
+    })
+
+    this.wrongAttemptsText = this.add.text(650, 560, '', {
+      fontSize: '22px',
+      color: '#555555'
     })
 
     this.feedbackText = this.add.text(400, 400, '', {
@@ -137,19 +144,19 @@ export class GameScene extends Phaser.Scene {
     
     this.gameState.round.balloons.forEach((balloon, index) => {
       const x = spacing * (index + 1)
-      const y = -50 - Math.random() * 100
+      const y = 100 + index * 30
 
       const sprite = this.add.graphics()
       this.drawBalloon(sprite, 0, 0, balloon.isCorrect)
       sprite.setPosition(x, y)
       sprite.setInteractive(
-        new Phaser.Geom.Circle(0, 0, 40),
+        new Phaser.Geom.Circle(0, 0, 45),
         Phaser.Geom.Circle.Contains
       )
       sprite.on('pointerdown', () => this.handleBalloonClick(balloon.id))
 
       const text = this.add.text(0, 0, balloon.formula.display, {
-        fontSize: '24px',
+        fontSize: '28px',
         color: '#000000',
         fontStyle: 'bold'
       }).setOrigin(0.5)
@@ -170,15 +177,18 @@ export class GameScene extends Phaser.Scene {
     const colors = [0xFF6B6B, 0xFFD93D, 0x6BCB77, 0x4D96FF, 0xA78BFA]
     const color = colors[Math.floor(Math.random() * colors.length)]
     
-    graphics.fillStyle(color, 1)
-    graphics.fillCircle(x, y, 40)
-    graphics.lineStyle(2, 0x000000, 0.3)
-    graphics.strokeCircle(x, y, 40)
+    graphics.fillStyle(color, 0.9)
+    graphics.fillCircle(x, y, 45)
+    graphics.lineStyle(3, 0x000000, 0.4)
+    graphics.strokeCircle(x, y, 45)
+    
+    graphics.fillStyle(0xFFFFFF, 0.3)
+    graphics.fillCircle(x - 12, y - 12, 8)
     
     graphics.lineStyle(2, 0x000000, 0.5)
     graphics.beginPath()
-    graphics.moveTo(x, y + 40)
-    graphics.lineTo(x, y + 60)
+    graphics.moveTo(x, y + 45)
+    graphics.lineTo(x, y + 70)
     graphics.strokePath()
   }
 
@@ -246,7 +256,7 @@ export class GameScene extends Phaser.Scene {
   private moveCat(direction: number) {
     this.catX += direction * 100
     this.catX = Phaser.Math.Clamp(this.catX, 50, 750)
-    this.drawCat(this.cat, this.catX, 520)
+    this.drawCat(this.cat, this.catX, 480)
   }
 
   private jump() {
@@ -279,9 +289,11 @@ export class GameScene extends Phaser.Scene {
 
       if (shouldShowHint(this.gameState.round) && bs.isCorrect) {
         bs.sprite.alpha = 0.7 + Math.sin(Date.now() * 0.005) * 0.3
+      } else {
+        bs.sprite.alpha = 1
       }
 
-      if (bs.y > 500) {
+      if (bs.y > 430) {
         this.gameState.round = resetBalloons(this.gameState.round)
         this.createBalloons()
       }
