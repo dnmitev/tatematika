@@ -213,8 +213,6 @@ export class GameScene extends Phaser.Scene {
     const count = this.gameState.round.balloons.length
     const spacing = availableWidth / count
     
-    this.formulaFontSize = 32
-    
     this.gameState.round.balloons.forEach((balloon, index) => {
       const x = safeMargin + spacing * (index + 0.5)
       const y = 110 + (index % 3) * 25
@@ -454,16 +452,15 @@ export class GameScene extends Phaser.Scene {
     
     const nearestBalloon = this.findNearestBalloon()
     if (nearestBalloon) {
-      this.catTargetX = nearestBalloon.x
-      
       const distance = Math.abs(this.catX - nearestBalloon.x)
-      const moveTime = distance > 5 ? 500 : 0
       
-      if (moveTime > 0) {
+      if (distance > 5) {
+        this.catTargetX = nearestBalloon.x
+        const speed = 20
+        const moveTime = Math.min(distance / speed * 1000 / 60, 400)
+        
         this.time.delayedCall(moveTime, () => {
-          if (Math.abs(this.catX - nearestBalloon.x) < 10) {
-            this.jumpToBalloon(nearestBalloon.id)
-          }
+          this.jumpToBalloon(nearestBalloon.id)
         })
       } else {
         this.jumpToBalloon(nearestBalloon.id)
@@ -489,7 +486,7 @@ export class GameScene extends Phaser.Scene {
   update(time: number, delta: number) {
     if (Math.abs(this.catX - this.catTargetX) > 2) {
       const distance = this.catTargetX - this.catX
-      const moveSpeed = Math.min(Math.abs(distance), 10)
+      const moveSpeed = Math.min(Math.abs(distance), 20)
       
       if (this.catX < this.catTargetX) {
         this.catX += moveSpeed
@@ -616,16 +613,15 @@ export class GameScene extends Phaser.Scene {
     if (!balloon) return
     
     const balloonCenterX = balloon.x
-    this.catTargetX = balloonCenterX
-    
     const distance = Math.abs(this.catX - balloonCenterX)
-    const moveTime = distance > 5 ? 500 : 0
     
-    if (moveTime > 0) {
+    if (distance > 5) {
+      this.catTargetX = balloonCenterX
+      const speed = 20
+      const moveTime = Math.min(distance / speed * 1000 / 60, 400)
+      
       this.time.delayedCall(moveTime, () => {
-        if (Math.abs(this.catX - balloonCenterX) < 10) {
-          this.jumpToBalloon(balloonId)
-        }
+        this.jumpToBalloon(balloonId)
       })
     } else {
       this.jumpToBalloon(balloonId)
