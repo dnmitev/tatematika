@@ -4,6 +4,7 @@ import { createInitialState, addStar, isLevelComplete, startNewLevel } from '../
 import { checkBalloon, handleCorrectPop, handleWrongAttempt, shouldShowHint, resetBalloons } from '../game-logic/round'
 import { loadSettings, saveSettings, updateSetting, DEFAULT_SETTINGS } from '../game-logic/settings'
 import { getPraiseMessage, WRONG_ANSWER_MESSAGE, LEVEL_COMPLETE_TITLE, LEVEL_COMPLETE_MESSAGE } from '../game-logic/strings'
+import { SettingsUI } from '../settings-ui'
 
 interface BalloonSprite {
   id: string
@@ -33,15 +34,14 @@ export class GameScene extends Phaser.Scene {
   private wrongAttemptsText!: Phaser.GameObjects.Text
   private feedbackText!: Phaser.GameObjects.Text
   private muteButton!: Phaser.GameObjects.Text
-  private settingsButton!: Phaser.GameObjects.Text
+  private settingsButton!: HTMLButtonElement
   private isMuted: boolean = false
   private balloonSpeed: number = 30
   private praiseIndex: number = 0
   private levelEndText: string | null = null
   private lastPlayedSound: string | null = null
   
-  private settingsPanel!: Phaser.GameObjects.Container
-  private settingsOpen: boolean = false
+  private settingsUI!: SettingsUI
   
   private formulaFontSize: number = 32
   private targetFontSize: number = 32
@@ -63,7 +63,6 @@ export class GameScene extends Phaser.Scene {
 
     this.createCat()
     this.createUI()
-    this.createSettingsUI()
     this.createBalloons()
 
     this.input.keyboard?.on('keydown', this.handleKeyDown, this)
@@ -161,131 +160,33 @@ export class GameScene extends Phaser.Scene {
     this.muteButton.input!.cursor = 'pointer'
     this.muteButton.on('pointerdown', () => this.toggleMute())
 
-    this.settingsButton = this.add.text(this.scale.width - 160, 10, '⚙️', {
-      fontSize: '32px',
-      padding: { x: 16, y: 16 }
-    }).setInteractive(
-      new Phaser.Geom.Rectangle(0, 0, 64, 64),
-      Phaser.Geom.Rectangle.Contains
-    )
-    this.settingsButton.input!.cursor = 'pointer'
-    this.settingsButton.on('pointerdown', () => this.openSettings())
-    this.settingsButton.setData('testid', 'button-settings')
+    this.createSettingsButton()
+    this.settingsUI = new SettingsUI()
 
     this.updateUI()
   }
 
-  private createSettingsUI() {
-    const centerX = this.scale.width / 2
-    const centerY = this.scale.height / 2
-    
-    this.settingsPanel = this.add.container(0, 0)
-    
-    const bg = this.add.rectangle(centerX, centerY, Math.min(600, this.scale.width - 40), Math.min(500, this.scale.height - 100), 0xFFFFFF, 0.95)
-    bg.setStrokeStyle(4, 0x4CAF50)
-    this.settingsPanel.add(bg)
-    
-    const title = this.add.text(centerX, centerY - 200, 'Настройки', {
-      fontSize: '28px',
-      color: '#000000',
-      fontStyle: 'bold'
-    }).setOrigin(0.5)
-    this.settingsPanel.add(title)
-    
-    let yOffset = centerY - 150
-    
-    const upperLimitLabel = this.add.text(centerX - 200, yOffset, 'Горна граница (5-20):', {
-      fontSize: '18px',
-      color: '#000000'
-    })
-    this.settingsPanel.add(upperLimitLabel)
-    
-    const upperLimitValue = this.add.text(centerX + 150, yOffset, String(this.gameState.settings.upperLimit), {
-      fontSize: '18px',
-      color: '#000000',
-      fontStyle: 'bold'
-    }).setData('testid', 'setting-upper-limit')
-    this.settingsPanel.add(upperLimitValue)
-    yOffset += 60
-    
-    const operationsLabel = this.add.text(centerX - 200, yOffset, 'Действия:', {
-      fontSize: '18px',
-      color: '#000000'
-    })
-    this.settingsPanel.add(operationsLabel)
-    
-    const operationsValue = this.add.text(centerX + 150, yOffset, this.translateOperation(this.gameState.settings.operations), {
-      fontSize: '18px',
-      color: '#000000',
-      fontStyle: 'bold'
-    }).setData('testid', 'setting-operations')
-    this.settingsPanel.add(operationsValue)
-    yOffset += 60
-    
-    const balloonCountLabel = this.add.text(centerX - 200, yOffset, 'Балони (2-5):', {
-      fontSize: '18px',
-      color: '#000000'
-    })
-    this.settingsPanel.add(balloonCountLabel)
-    
-    const balloonCountValue = this.add.text(centerX + 150, yOffset, String(this.gameState.settings.balloonCount), {
-      fontSize: '18px',
-      color: '#000000',
-      fontStyle: 'bold'
-    }).setData('testid', 'setting-balloon-count')
-    this.settingsPanel.add(balloonCountValue)
-    yOffset += 60
-    
-    const correctPerLevelLabel = this.add.text(centerX - 200, yOffset, 'Верни за ниво (5-20):', {
-      fontSize: '18px',
-      color: '#000000'
-    })
-    this.settingsPanel.add(correctPerLevelLabel)
-    
-    const correctPerLevelValue = this.add.text(centerX + 150, yOffset, String(this.gameState.settings.correctBalloonsPerLevel), {
-      fontSize: '18px',
-      color: '#000000',
-      fontStyle: 'bold'
-    }).setData('testid', 'setting-correct-per-level')
-    this.settingsPanel.add(correctPerLevelValue)
-    yOffset += 60
-    
-    const speedLabel = this.add.text(centerX - 200, yOffset, 'Скорост:', {
-      fontSize: '18px',
-      color: '#000000'
-    })
-    this.settingsPanel.add(speedLabel)
-    
-    const speedValue = this.add.text(centerX + 150, yOffset, this.translateSpeed(this.gameState.settings.balloonSpeed), {
-      fontSize: '18px',
-      color: '#000000',
-      fontStyle: 'bold'
-    }).setData('testid', 'setting-speed')
-    this.settingsPanel.add(speedValue)
-    yOffset += 80
-    
-    const closeButton = this.add.text(centerX, yOffset, 'Затвори', {
-      fontSize: '24px',
-      color: '#FFFFFF',
-      backgroundColor: '#2196F3',
-      padding: { x: 30, y: 15 }
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true })
-      .on('pointerdown', () => this.closeSettings())
-    this.settingsPanel.add(closeButton)
-    
-    this.settingsPanel.setData('testid', 'settings-panel')
-    this.settingsPanel.setVisible(false)
+  private createSettingsButton() {
+    this.settingsButton = document.createElement('button')
+    this.settingsButton.textContent = '⚙️'
+    this.settingsButton.setAttribute('data-testid', 'button-settings')
+    this.settingsButton.style.cssText = `
+      position: fixed;
+      top: 10px;
+      right: 90px;
+      width: 64px;
+      height: 64px;
+      font-size: 32px;
+      background: rgba(255,255,255,0.8);
+      border: 2px solid #4CAF50;
+      border-radius: 8px;
+      cursor: pointer;
+      z-index: 9000;
+    `
+    this.settingsButton.addEventListener('click', () => this.openSettings())
+    document.body.appendChild(this.settingsButton)
   }
 
-  private translateOperation(op: string): string {
-    if (op === 'addition') return 'само събиране'
-    if (op === 'subtraction') return 'само изваждане'
-    return 'двете'
-  }
-
-  private translateSpeed(speed: string): string {
-    return speed === 'slow' ? 'бавна' : 'средна'
-  }
 
   private updateUI() {
     this.targetText.setText(`${this.gameState.round.target}`)
@@ -378,7 +279,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handlePointerDown(pointer: Phaser.Input.Pointer) {
-    if (this.settingsOpen) return
+    if (this.settingsUI && this.settingsUI.isOpen()) return
     
     for (const balloon of this.balloonSprites) {
       const radius = 40
@@ -512,7 +413,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleKeyDown(event: KeyboardEvent) {
-    if (this.settingsOpen) return
+    if (this.settingsUI && this.settingsUI.isOpen()) return
     
     if (event.key === 'ArrowLeft') {
       this.moveCat(-1)
@@ -629,17 +530,25 @@ export class GameScene extends Phaser.Scene {
   }
 
   public openSettings() {
-    this.settingsOpen = true
-    this.settingsPanel.setVisible(true)
+    if (this.settingsUI) {
+      this.settingsUI.open(() => this.onSettingsClosed())
+    }
   }
 
   public closeSettings() {
-    this.settingsOpen = false
-    this.settingsPanel.setVisible(false)
+    if (this.settingsUI) {
+      this.settingsUI.close()
+    }
   }
 
   public isSettingsOpen(): boolean {
-    return this.settingsOpen
+    return this.settingsUI ? this.settingsUI.isOpen() : false
+  }
+
+  private onSettingsClosed() {
+    const settings = loadSettings()
+    this.gameState.settings = settings
+    this.balloonSpeed = settings.balloonSpeed === 'medium' ? 50 : 30
   }
 
   public getGameState() {
