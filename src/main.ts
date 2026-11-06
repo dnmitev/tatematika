@@ -54,20 +54,18 @@ declare global {
   }
 }
 
-// Phaser config with fixed game dimensions and responsive scaling
-// Game space is always 800x600, scaled to fit viewport
+// Phaser config with viewport-matched dimensions
+// Game space matches viewport for true responsive layout
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
-  width: 800,
-  height: 600,
   parent: 'game-container',
   scene: [GameScene, LevelCompleteScene],
   backgroundColor: '#87CEEB',
   scale: {
-    mode: Phaser.Scale.FIT,
-    autoCenter: Phaser.Scale.CENTER_BOTH,
-    width: 800,
-    height: 600
+    mode: Phaser.Scale.RESIZE,
+    parent: 'game-container',
+    width: window.innerWidth,
+    height: window.innerHeight
   }
 }
 

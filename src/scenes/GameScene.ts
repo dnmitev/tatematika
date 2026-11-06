@@ -23,11 +23,11 @@ interface BalloonSprite {
 export class GameScene extends Phaser.Scene {
   private gameState!: GameState
   private cat!: Phaser.GameObjects.Graphics
-  private catX: number = 400
-  private catY: number = 460
-  private catTargetX: number = 400
+  private catX: number = 0
+  private catY: number = 0
+  private catTargetX: number = 0
   private catIsJumping: boolean = false
-  private catJumpStartY: number = 460
+  private catJumpStartY: number = 0
   private catJumpTime: number = 0
   private balloonSprites: BalloonSprite[] = []
   private targetText!: Phaser.GameObjects.Text
@@ -94,26 +94,31 @@ export class GameScene extends Phaser.Scene {
   
   private calculateFontSizes() {
     const minCSSPixels = 32
-    const canvas = document.querySelector('canvas')
-    if (canvas) {
-      const rect = canvas.getBoundingClientRect()
-      const scale = rect.width / 800
-      const minGamePixels = minCSSPixels / scale
-      const maxFormula = this.scale.width / 16
-      this.formulaFontSize = Math.max(minGamePixels, Math.min(maxFormula, 60))
-      this.targetFontSize = Math.max(minGamePixels, 56)
-    } else {
-      this.formulaFontSize = 48
-      this.targetFontSize = 56
-    }
+    this.formulaFontSize = Math.max(minCSSPixels, Math.min(this.scale.width / 12, 60))
+    this.targetFontSize = Math.max(minCSSPixels, Math.min(this.scale.width / 10, 72))
   }
 
   private handleResize(gameSize: Phaser.Structs.Size) {
     this.cameras.main.setViewport(0, 0, gameSize.width, gameSize.height)
+    
+    if (this.settingsButton && this.settingsButton.parentElement) {
+      this.settingsButton.remove()
+    }
+    
+    this.calculateFontSizes()
+    this.children.removeAll(true)
+    
+    this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0x87CEEB)
+    this.createCat()
+    this.createUI()
+    this.createBalloons()
   }
 
   private createCat() {
-    this.catY = Math.min(460, this.scale.height - 140)
+    this.catX = this.scale.width / 2
+    this.catTargetX = this.catX
+    this.catY = Math.min(this.scale.height - 100, this.scale.height * 0.85)
+    this.catJumpStartY = this.catY
     this.cat = this.add.graphics()
     this.drawCat(this.cat, this.catX, this.catY)
   }
@@ -143,51 +148,54 @@ export class GameScene extends Phaser.Scene {
 
   private createUI() {
     const centerX = this.scale.width / 2
+    const titleSize = Math.max(20, Math.min(32, this.scale.width / 15))
+    const hudSize = Math.max(16, Math.min(24, this.scale.width / 20))
+    const muteSize = Math.max(48, Math.min(80, this.scale.width / 8))
     
-    this.add.text(centerX, 20, 'Котето и балоните', {
-      fontSize: '24px',
+    this.add.text(centerX, Math.max(10, titleSize / 2), 'Котето и балоните', {
+      fontSize: `${titleSize}px`,
       color: '#FF1493',
       fontStyle: 'bold'
     }).setOrigin(0.5)
 
-    this.add.text(15, this.scale.height - 110, 'Цел:', {
-      fontSize: '20px',
+    const targetY = Math.max(this.scale.height - 70, this.scale.height * 0.9)
+    this.add.text(10, targetY, 'Цел:', {
+      fontSize: `${hudSize}px`,
       color: '#000000',
       fontStyle: 'bold'
     })
 
-    this.targetText = this.add.text(75, this.scale.height - 115, '', {
+    this.targetText = this.add.text(10 + hudSize * 3, targetY - 5, '', {
       fontSize: `${this.targetFontSize}px`,
       color: '#000000',
       fontStyle: 'bold',
       backgroundColor: '#FFEB3B',
-      padding: { x: 12, y: 6 }
+      padding: { x: 8, y: 4 }
     })
 
-    this.starsText = this.add.text(15, 50, '', {
-      fontSize: '24px',
+    this.starsText = this.add.text(10, Math.max(titleSize + 20, 40), '', {
+      fontSize: `${hudSize}px`,
       color: '#FFD700',
       fontStyle: 'bold'
     })
 
-    this.wrongAttemptsText = this.add.text(this.scale.width - 200, this.scale.height - 110, '', {
-      fontSize: '18px',
+    this.wrongAttemptsText = this.add.text(this.scale.width - 10, targetY, '', {
+      fontSize: `${Math.max(14, hudSize - 2)}px`,
       color: '#555555'
-    })
+    }).setOrigin(1, 0)
 
     this.feedbackText = this.add.text(centerX, this.scale.height / 2, '', {
-      fontSize: '32px',
+      fontSize: `${Math.max(24, Math.min(40, this.scale.width / 12))}px`,
       color: '#FF1493',
       fontStyle: 'bold',
       backgroundColor: '#FFFFFF',
       padding: { x: 12, y: 6 }
     }).setOrigin(0.5).setVisible(false)
 
-    this.muteButton = this.add.text(this.scale.width - 170, 10, '🔊', {
-      fontSize: '80px',
-      padding: { x: 40, y: 40 }
+    this.muteButton = this.add.text(this.scale.width - muteSize - 10, 10, '🔊', {
+      fontSize: `${muteSize}px`
     }).setInteractive(
-      new Phaser.Geom.Rectangle(0, 0, 160, 160),
+      new Phaser.Geom.Rectangle(0, 0, muteSize, muteSize),
       Phaser.Geom.Rectangle.Contains
     )
     this.muteButton.input!.cursor = 'pointer'
@@ -204,13 +212,16 @@ export class GameScene extends Phaser.Scene {
     this.settingsButton = document.createElement('button')
     this.settingsButton.textContent = '⚙️'
     this.settingsButton.setAttribute('data-testid', 'button-settings')
+    const buttonSize = Math.max(48, Math.min(64, window.innerWidth / 10))
+    const muteSize = Math.max(48, Math.min(80, window.innerWidth / 8))
+    const rightOffset = muteSize + 20
     this.settingsButton.style.cssText = `
       position: fixed;
       top: 10px;
-      right: 90px;
-      width: 64px;
-      height: 64px;
-      font-size: 32px;
+      right: ${rightOffset}px;
+      width: ${buttonSize}px;
+      height: ${buttonSize}px;
+      font-size: ${buttonSize / 2}px;
       background: rgba(255,255,255,0.8);
       border: 2px solid #4CAF50;
       border-radius: 8px;
@@ -237,75 +248,81 @@ export class GameScene extends Phaser.Scene {
 
     const count = this.gameState.round.balloons.length
     
-    const canvas = document.querySelector('canvas')
-    const scale = canvas ? canvas.getBoundingClientRect().width / 800 : 1
-    const minCSSTarget = 64
-    const minGameTargetDiameter = minCSSTarget / scale
+    const titleSize = Math.max(20, Math.min(32, this.scale.width / 15))
+    const hudTopSpace = Math.max(titleSize + 50, 60)
+    const hudBottomSpace = Math.max(80, this.scale.height * 0.15)
+    const availableHeight = this.scale.height - hudTopSpace - hudBottomSpace
+    const availableWidth = this.scale.width
+    const margin = Math.max(10, this.scale.width * 0.03)
     
-    const hudTop = 50
-    const hudBottom = 90
-    const availableHeight = 600 - hudTop - hudBottom
-    const safeMargin = 20
-    const availableWidth = 800 - 2 * safeMargin
+    const minTarget = 64
+    const padding = 20
     
-    let balloonWidth: number
-    let balloonHeight: number
+    const tempTexts = this.gameState.round.balloons.map(balloon => 
+      this.add.text(0, 0, balloon.formula.display, {
+        fontSize: `${this.formulaFontSize}px`,
+        color: '#000000',
+        fontStyle: 'bold'
+      })
+    )
+    
+    const maxFormulaWidth = Math.max(...tempTexts.map(t => t.width))
+    tempTexts.forEach(t => t.destroy())
+    
+    const balloonWidth = Math.max(minTarget, maxFormulaWidth + padding * 2)
+    const balloonHeight = Math.max(minTarget, Math.min(balloonWidth * 0.8, availableHeight / count))
+    
     let positions: Array<{ x: number; y: number }> = []
     
     if (count <= 3) {
-      const maxBalloonWidth = (availableWidth - (count - 1) * safeMargin) / count
-      const maxBalloonHeight = availableHeight
-      balloonWidth = Math.max(minGameTargetDiameter, Math.min(maxBalloonWidth, 200))
-      balloonHeight = Math.max(minGameTargetDiameter, Math.min(maxBalloonHeight, balloonWidth * 0.9))
+      const totalWidth = count * balloonWidth + (count - 1) * margin
+      const canFitInRow = totalWidth <= availableWidth - 2 * margin
       
-      const totalWidth = count * balloonWidth + (count - 1) * safeMargin
-      const startX = (800 - totalWidth) / 2 + balloonWidth / 2
-      const y = hudTop + availableHeight / 2
-      
-      positions = Array.from({ length: count }, (_, index) => ({
-        x: startX + index * (balloonWidth + safeMargin),
-        y
-      }))
+      if (canFitInRow) {
+        const startX = (availableWidth - totalWidth) / 2 + balloonWidth / 2
+        const y = hudTopSpace + availableHeight / 2
+        positions = Array.from({ length: count }, (_, i) => ({
+          x: startX + i * (balloonWidth + margin),
+          y
+        }))
+      } else {
+        const x = availableWidth / 2
+        const rowSpacing = (availableHeight - count * balloonHeight) / (count + 1)
+        positions = Array.from({ length: count }, (_, i) => ({
+          x,
+          y: hudTopSpace + rowSpacing + i * (balloonHeight + rowSpacing) + balloonHeight / 2
+        }))
+      }
     } else if (count === 4) {
-      const maxBalloonWidth = (availableWidth - safeMargin) / 2
-      const maxBalloonHeight = (availableHeight - safeMargin) / 2
-      balloonWidth = Math.max(minGameTargetDiameter, Math.min(maxBalloonWidth, 180))
-      balloonHeight = Math.max(minGameTargetDiameter, Math.min(maxBalloonHeight, balloonWidth * 0.75))
-      
-      const col1 = safeMargin + balloonWidth / 2
-      const col2 = 800 - safeMargin - balloonWidth / 2
-      const row1 = hudTop + safeMargin + balloonHeight / 2
-      const row2 = hudTop + availableHeight - safeMargin - balloonHeight / 2
+      const colSpacing = (availableWidth - 2 * balloonWidth) / 3
+      const col1 = colSpacing + balloonWidth / 2
+      const col2 = colSpacing + balloonWidth + colSpacing + balloonWidth / 2
+      const rowSpacing = (availableHeight - 2 * balloonHeight) / 3
+      const y1 = hudTopSpace + rowSpacing + balloonHeight / 2
+      const y2 = y1 + balloonHeight + rowSpacing
       
       positions = [
-        { x: col1, y: row1 },
-        { x: col2, y: row1 },
-        { x: col1, y: row2 },
-        { x: col2, y: row2 }
+        { x: col1, y: y1 },
+        { x: col2, y: y1 },
+        { x: col1, y: y2 },
+        { x: col2, y: y2 }
       ]
     } else {
-      const maxBalloonWidth = (availableWidth - safeMargin) / 2
-      const maxBalloonHeight = (availableHeight - 4 * safeMargin) / 3
-      balloonWidth = Math.max(minGameTargetDiameter, Math.min(maxBalloonWidth, 160))
-      balloonHeight = Math.max(minGameTargetDiameter, Math.min(maxBalloonHeight, balloonWidth * 0.75))
-      
-      const col1 = safeMargin + balloonWidth / 2
-      const col2 = 800 - safeMargin - balloonWidth / 2
-      const colCenter = 400
-      
-      const totalHeight = 3 * balloonHeight + 4 * safeMargin
-      const topMargin = hudTop + (availableHeight - totalHeight + 2 * safeMargin) / 2
-      
-      const row1 = topMargin + safeMargin + balloonHeight / 2
-      const row2 = row1 + balloonHeight + safeMargin
-      const row3 = row2 + balloonHeight + safeMargin
+      const colSpacing = (availableWidth - 2 * balloonWidth) / 3
+      const col1 = colSpacing + balloonWidth / 2
+      const col2 = colSpacing + balloonWidth + colSpacing + balloonWidth / 2
+      const colCenter = availableWidth / 2
+      const rowSpacing = (availableHeight - 3 * balloonHeight) / 4
+      const y1 = hudTopSpace + rowSpacing + balloonHeight / 2
+      const y2 = y1 + balloonHeight + rowSpacing
+      const y3 = y2 + balloonHeight + rowSpacing
       
       positions = [
-        { x: colCenter, y: row1 },
-        { x: col1, y: row2 },
-        { x: col2, y: row2 },
-        { x: col1, y: row3 },
-        { x: col2, y: row3 }
+        { x: colCenter, y: y1 },
+        { x: col1, y: y2 },
+        { x: col2, y: y2 },
+        { x: col1, y: y3 },
+        { x: col2, y: y3 }
       ]
     }
     
