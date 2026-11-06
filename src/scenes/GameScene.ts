@@ -41,6 +41,7 @@ export class GameScene extends Phaser.Scene {
   private praiseIndex: number = 0
   private levelEndText: string | null = null
   private lastPlayedSound: string | null = null
+  private pendingJumpBalloonId: string | null = null
   
   private settingsUI!: SettingsUI
   private levelCompleteUI!: LevelCompleteUI
@@ -451,27 +452,8 @@ export class GameScene extends Phaser.Scene {
     
     const nearestBalloon = this.findNearestBalloon()
     if (nearestBalloon) {
-      const distance = Math.abs(this.catX - nearestBalloon.x)
-      
-      if (distance > 2) {
-        this.catTargetX = nearestBalloon.x
-        
-        this.tweens.add({
-          targets: { x: this.catX },
-          x: nearestBalloon.x,
-          duration: Math.min(distance * 10, 500),
-          ease: 'Linear',
-          onUpdate: (tween) => {
-            this.catX = (tween.targets[0] as any).x
-            this.drawCat(this.cat, this.catX, this.catY)
-          },
-          onComplete: () => {
-            this.jumpToBalloon(nearestBalloon.id)
-          }
-        })
-      } else {
-        this.jumpToBalloon(nearestBalloon.id)
-      }
+      this.catTargetX = nearestBalloon.x
+      this.pendingJumpBalloonId = nearestBalloon.id
     }
   }
 
@@ -491,6 +473,26 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number) {
+    if (!this.catIsJumping && this.pendingJumpBalloonId && Math.abs(this.catX - this.catTargetX) > 2) {
+      const distance = this.catTargetX - this.catX
+      const moveSpeed = Math.min(Math.abs(distance), 20)
+      
+      if (this.catX < this.catTargetX) {
+        this.catX += moveSpeed
+        if (this.catX > this.catTargetX) this.catX = this.catTargetX
+      } else {
+        this.catX -= moveSpeed
+        if (this.catX < this.catTargetX) this.catX = this.catTargetX
+      }
+      this.drawCat(this.cat, this.catX, this.catY)
+      
+      if (Math.abs(this.catX - this.catTargetX) <= 2) {
+        const balloonId = this.pendingJumpBalloonId
+        this.pendingJumpBalloonId = null
+        this.jumpToBalloon(balloonId)
+      }
+    }
+    
     if (this.catIsJumping) {
       this.catJumpTime += delta / 1000
       const jumpDuration = 0.6
@@ -613,27 +615,8 @@ export class GameScene extends Phaser.Scene {
     }
     
     const balloonCenterX = balloon.x
-    const distance = Math.abs(this.catX - balloonCenterX)
-    
-    if (distance > 2) {
-      this.catTargetX = balloonCenterX
-      
-      this.tweens.add({
-        targets: { x: this.catX },
-        x: balloonCenterX,
-        duration: Math.min(distance * 10, 500),
-        ease: 'Linear',
-        onUpdate: (tween) => {
-          this.catX = (tween.targets[0] as any).x
-          this.drawCat(this.cat, this.catX, this.catY)
-        },
-        onComplete: () => {
-          this.jumpToBalloon(balloonId)
-        }
-      })
-    } else {
-      this.jumpToBalloon(balloonId)
-    }
+    this.catTargetX = balloonCenterX
+    this.pendingJumpBalloonId = balloonId
   }
 
   public pressKey(key: 'left' | 'right' | 'space' | 'up') {
