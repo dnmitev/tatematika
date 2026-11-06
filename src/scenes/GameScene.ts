@@ -5,6 +5,7 @@ import { checkBalloon, handleCorrectPop, handleWrongAttempt, shouldShowHint, res
 import { loadSettings, saveSettings, updateSetting, DEFAULT_SETTINGS } from '../game-logic/settings'
 import { getPraiseMessage, WRONG_ANSWER_MESSAGE, LEVEL_COMPLETE_TITLE, LEVEL_COMPLETE_MESSAGE } from '../game-logic/strings'
 import { SettingsUI } from '../settings-ui'
+import { LevelCompleteUI } from '../level-complete-ui'
 
 interface BalloonSprite {
   id: string
@@ -42,6 +43,7 @@ export class GameScene extends Phaser.Scene {
   private lastPlayedSound: string | null = null
   
   private settingsUI!: SettingsUI
+  private levelCompleteUI!: LevelCompleteUI
   
   private formulaFontSize: number = 32
   private targetFontSize: number = 32
@@ -165,6 +167,7 @@ export class GameScene extends Phaser.Scene {
 
     this.createSettingsButton()
     this.settingsUI = new SettingsUI()
+    this.levelCompleteUI = new LevelCompleteUI()
 
     this.updateUI()
   }
@@ -409,10 +412,24 @@ export class GameScene extends Phaser.Scene {
     const stars = this.gameState.stars
     this.levelEndText = `${LEVEL_COMPLETE_TITLE} ${LEVEL_COMPLETE_MESSAGE(stars)}`
     this.playSound('level-complete')
-    this.scene.start('LevelCompleteScene', { 
+    
+    this.levelCompleteUI.show(
       stars,
-      gameState: this.gameState 
-    })
+      () => this.handlePlayAgain(),
+      () => this.handleToMenu()
+    )
+  }
+
+  private handlePlayAgain() {
+    this.levelCompleteUI.hide()
+    this.gameState = startNewLevel(this.gameState)
+    this.createBalloons()
+    this.updateUI()
+  }
+
+  private handleToMenu() {
+    this.levelCompleteUI.hide()
+    this.scene.restart()
   }
 
   private handleKeyDown(event: KeyboardEvent) {
@@ -634,7 +651,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   public getLevelEndText() {
-    return this.levelEndText
+    if (this.levelEndText) {
+      return this.levelEndText
+    }
+    return null
   }
 
   public getLastPlayedSound() {
