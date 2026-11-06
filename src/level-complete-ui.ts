@@ -23,6 +23,11 @@ export class LevelCompleteUI {
     const contentBox = document.createElement('div')
     contentBox.style.cssText = `
       text-align: center;
+      min-width: 300px;
+      min-height: 200px;
+      background: rgba(255, 255, 255, 0.95);
+      padding: 40px;
+      border-radius: 16px;
     `
 
     const title = document.createElement('h1')
