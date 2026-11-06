@@ -142,13 +142,13 @@ export class GameScene extends Phaser.Scene {
       fontStyle: 'bold'
     }).setOrigin(0.5)
 
-    this.add.text(15, this.scale.height - 70, 'Цел:', {
+    this.add.text(15, this.scale.height - 110, 'Цел:', {
       fontSize: '20px',
       color: '#000000',
       fontStyle: 'bold'
     })
 
-    this.targetText = this.add.text(75, this.scale.height - 75, '', {
+    this.targetText = this.add.text(75, this.scale.height - 115, '', {
       fontSize: `${this.targetFontSize}px`,
       color: '#000000',
       fontStyle: 'bold',
@@ -162,7 +162,7 @@ export class GameScene extends Phaser.Scene {
       fontStyle: 'bold'
     })
 
-    this.wrongAttemptsText = this.add.text(this.scale.width - 200, this.scale.height - 70, '', {
+    this.wrongAttemptsText = this.add.text(this.scale.width - 200, this.scale.height - 110, '', {
       fontSize: '18px',
       color: '#555555'
     })
@@ -227,7 +227,7 @@ export class GameScene extends Phaser.Scene {
     })
     this.balloonSprites = []
 
-    const balloonRadius = 90
+    const balloonRadius = 100
     const count = this.gameState.round.balloons.length
     
     let positions: Array<{ x: number; y: number }> = []
@@ -243,24 +243,24 @@ export class GameScene extends Phaser.Scene {
         y: 150
       }))
     } else if (count === 4) {
-      const col1 = this.scale.width * 0.25
-      const col2 = this.scale.width * 0.75
+      const col1 = this.scale.width * 0.3
+      const col2 = this.scale.width * 0.7
       positions = [
-        { x: col1, y: 140 },
-        { x: col2, y: 140 },
-        { x: col1, y: 220 },
-        { x: col2, y: 220 }
+        { x: col1, y: 150 },
+        { x: col2, y: 150 },
+        { x: col1, y: 280 },
+        { x: col2, y: 280 }
       ]
     } else {
-      const col1 = this.scale.width * 0.2
+      const col1 = this.scale.width * 0.25
       const col2 = this.scale.width * 0.5
-      const col3 = this.scale.width * 0.8
+      const col3 = this.scale.width * 0.75
       positions = [
-        { x: col1, y: 140 },
-        { x: col2, y: 140 },
-        { x: col3, y: 140 },
-        { x: col1 + (col2 - col1) / 2, y: 220 },
-        { x: col2 + (col3 - col2) / 2, y: 220 }
+        { x: col2, y: 130 },
+        { x: col1, y: 230 },
+        { x: col3, y: 230 },
+        { x: col1 + (col2 - col1) * 0.5, y: 340 },
+        { x: col2 + (col3 - col2) * 0.5, y: 340 }
       ]
     }
     
@@ -700,14 +700,26 @@ export class GameScene extends Phaser.Scene {
   }
 
   public getFormulaFontSize() {
+    if (this.balloonSprites.length > 0 && this.balloonSprites[0].text) {
+      const bounds = this.balloonSprites[0].text.getBounds()
+      return bounds.height
+    }
     return this.formulaFontSize
   }
 
   public getTargetFontSize() {
+    if (this.targetText) {
+      const bounds = this.targetText.getBounds()
+      return bounds.height
+    }
     return this.targetFontSize
   }
 
   public getMuteButtonBounds() {
+    if (this.muteButton && this.muteButton.input) {
+      const hitArea = this.muteButton.input.hitArea as Phaser.Geom.Rectangle
+      return { width: hitArea.width, height: hitArea.height }
+    }
     return { width: 160, height: 160 }
   }
 
@@ -722,6 +734,16 @@ export class GameScene extends Phaser.Scene {
   public getBalloonBounds(balloonId: string) {
     const balloon = this.balloonSprites.find(b => b.id === balloonId)
     if (!balloon) return null
+    
+    if (balloon.sprite && balloon.sprite.input) {
+      const hitArea = balloon.sprite.input.hitArea as Phaser.Geom.Ellipse
+      return {
+        x: balloon.x - hitArea.width / 2,
+        y: balloon.y - hitArea.height / 2,
+        width: hitArea.width,
+        height: hitArea.height
+      }
+    }
     
     const radiusX = 90 * 1.5
     const radiusY = 90
