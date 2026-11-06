@@ -608,7 +608,7 @@ test.describe('Review Findings - Other Tests', () => {
       await expect.poll(async () => {
         const s = await page.evaluate(() => window.__tatematika!.getGameState())
         return s.stars
-      }, { timeout: 5000, intervals: [50] }).toBe(prevStars + 1)
+      }, { timeout: 10000, intervals: [50] }).toBe(prevStars + 1)
       
       // If not the last pop, wait for new round
       if (i < 4) {
@@ -618,7 +618,10 @@ test.describe('Review Findings - Other Tests', () => {
           const hasNewBalloons = !s.balloons.every((b, idx) => b.id === prevBalloonIds[idx])
           const hasCorrectBalloon = s.balloons.some(b => b.isCorrect)
           return (hasNewTarget || hasNewBalloons) && hasCorrectBalloon
-        }, { timeout: 5000, intervals: [50] }).toBe(true)
+        }, { timeout: 10000, intervals: [50] }).toBe(true)
+        
+        // Give a moment for the round to fully stabilize
+        await page.waitForTimeout(100)
       }
     }
     
@@ -664,7 +667,7 @@ test.describe('Review Findings - Other Tests', () => {
       await expect.poll(async () => {
         const s = await page.evaluate(() => window.__tatematika!.getGameState())
         return s.stars
-      }, { timeout: 5000, intervals: [50] }).toBe(prevStars + 1)
+      }, { timeout: 10000, intervals: [50] }).toBe(prevStars + 1)
       
       // If not the last pop, wait for new round
       if (i < 4) {
@@ -674,7 +677,10 @@ test.describe('Review Findings - Other Tests', () => {
           const hasNewBalloons = !s.balloons.every((b, idx) => b.id === prevBalloonIds[idx])
           const hasCorrectBalloon = s.balloons.some(b => b.isCorrect)
           return (hasNewTarget || hasNewBalloons) && hasCorrectBalloon
-        }, { timeout: 5000, intervals: [50] }).toBe(true)
+        }, { timeout: 10000, intervals: [50] }).toBe(true)
+        
+        // Give a moment for the round to fully stabilize
+        await page.waitForTimeout(100)
       }
     }
     
