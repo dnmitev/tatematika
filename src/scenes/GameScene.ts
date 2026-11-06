@@ -1,7 +1,7 @@
 import Phaser from 'phaser'
 import type { GameState, Balloon } from '../game-logic/types'
 import { createInitialState, addStar, isLevelComplete, startNewLevel } from '../game-logic/scoring'
-import { checkBalloon, handleCorrectPop, handleWrongAttempt, shouldShowHint, resetBalloons } from '../game-logic/round'
+import { checkBalloon, handleCorrectPop, handleWrongAttempt, shouldShowHint, resetBalloons, createRound } from '../game-logic/round'
 import { loadSettings, saveSettings, updateSetting, DEFAULT_SETTINGS } from '../game-logic/settings'
 import { getPraiseMessage, WRONG_ANSWER_MESSAGE, LEVEL_COMPLETE_TITLE, LEVEL_COMPLETE_MESSAGE } from '../game-logic/strings'
 import { SettingsUI } from '../settings-ui'
@@ -569,7 +569,7 @@ export class GameScene extends Phaser.Scene {
     const settings = loadSettings()
     this.gameState.settings = settings
     this.balloonSpeed = settings.balloonSpeed === 'medium' ? 50 : 30
-    this.gameState = createInitialState(settings)
+    this.gameState.round = createRound(settings)
     this.createBalloons()
     this.updateUI()
   }
