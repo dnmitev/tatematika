@@ -92,8 +92,8 @@ export class GameScene extends Phaser.Scene {
   }
   
   private calculateFontSizes() {
-    this.formulaFontSize = 69
-    this.targetFontSize = 69
+    this.formulaFontSize = 80
+    this.targetFontSize = 80
   }
 
   private handleResize(gameSize: Phaser.Structs.Size) {
@@ -171,11 +171,11 @@ export class GameScene extends Phaser.Scene {
       padding: { x: 12, y: 6 }
     }).setOrigin(0.5).setVisible(false)
 
-    this.muteButton = this.add.text(this.scale.width - 150, 10, '🔊', {
-      fontSize: '64px',
-      padding: { x: 32, y: 32 }
+    this.muteButton = this.add.text(this.scale.width - 170, 10, '🔊', {
+      fontSize: '80px',
+      padding: { x: 40, y: 40 }
     }).setInteractive(
-      new Phaser.Geom.Rectangle(0, 0, 137, 137),
+      new Phaser.Geom.Rectangle(0, 0, 160, 160),
       Phaser.Geom.Rectangle.Contains
     )
     this.muteButton.input!.cursor = 'pointer'
@@ -223,7 +223,7 @@ export class GameScene extends Phaser.Scene {
     })
     this.balloonSprites = []
 
-    const balloonRadius = 69
+    const balloonRadius = 80
     const count = this.gameState.round.balloons.length
     const balloonDiameter = balloonRadius * 2
     const totalBalloonWidth = count * balloonDiameter
@@ -263,7 +263,7 @@ export class GameScene extends Phaser.Scene {
     })
   }
 
-  private drawBalloon(graphics: Phaser.GameObjects.Graphics, x: number, y: number, isCorrect: boolean, radius: number = 69) {
+  private drawBalloon(graphics: Phaser.GameObjects.Graphics, x: number, y: number, isCorrect: boolean, radius: number = 80) {
     const colors = [0xFF6B6B, 0xFFD93D, 0x6BCB77, 0x4D96FF, 0xA78BFA]
     const color = colors[Math.floor(Math.random() * colors.length)]
     
@@ -663,7 +663,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   public getMuteButtonBounds() {
-    return { width: 137, height: 137 }
+    return { width: 160, height: 160 }
   }
 
   public getCatPosition() {
@@ -678,7 +678,7 @@ export class GameScene extends Phaser.Scene {
     const balloon = this.balloonSprites.find(b => b.id === balloonId)
     if (!balloon) return null
     
-    const radius = 69
+    const radius = 80
     return {
       x: balloon.x - radius,
       y: balloon.y - radius,
