@@ -52,6 +52,15 @@ export class GameScene extends Phaser.Scene {
     super({ key: 'GameScene' })
   }
 
+  shutdown() {
+    if (this.settingsButton && this.settingsButton.parentElement) {
+      this.settingsButton.removeEventListener('click', () => this.openSettings())
+      this.settingsButton.remove()
+    }
+    
+    this.events.off('shutdown', this.shutdown, this)
+  }
+
   create() {
     const settings = loadSettings()
     this.gameState = createInitialState(settings)
@@ -69,6 +78,8 @@ export class GameScene extends Phaser.Scene {
 
     this.input.keyboard?.on('keydown', this.handleKeyDown, this)
     this.input.on('pointerdown', this.handlePointerDown, this)
+    
+    this.events.once('shutdown', this.shutdown, this)
   }
   
   private calculateFontSizes() {
@@ -442,13 +453,21 @@ export class GameScene extends Phaser.Scene {
     if (nearestBalloon) {
       const distance = Math.abs(this.catX - nearestBalloon.x)
       
-      if (distance > 5) {
+      if (distance > 2) {
         this.catTargetX = nearestBalloon.x
-        const speed = 20
-        const moveTime = Math.min(distance / speed * 1000 / 60, 400)
         
-        this.time.delayedCall(moveTime, () => {
-          this.jumpToBalloon(nearestBalloon.id)
+        this.tweens.add({
+          targets: { x: this.catX },
+          x: nearestBalloon.x,
+          duration: Math.min(distance * 10, 500),
+          ease: 'Linear',
+          onUpdate: (tween) => {
+            this.catX = (tween.targets[0] as any).x
+            this.drawCat(this.cat, this.catX, this.catY)
+          },
+          onComplete: () => {
+            this.jumpToBalloon(nearestBalloon.id)
+          }
         })
       } else {
         this.jumpToBalloon(nearestBalloon.id)
@@ -472,20 +491,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number) {
-    if (Math.abs(this.catX - this.catTargetX) > 2) {
-      const distance = this.catTargetX - this.catX
-      const moveSpeed = Math.min(Math.abs(distance), 20)
-      
-      if (this.catX < this.catTargetX) {
-        this.catX += moveSpeed
-        if (this.catX > this.catTargetX) this.catX = this.catTargetX
-      } else {
-        this.catX -= moveSpeed
-        if (this.catX < this.catTargetX) this.catX = this.catTargetX
-      }
-      this.drawCat(this.cat, this.catX, this.catY)
-    }
-    
     if (this.catIsJumping) {
       this.catJumpTime += delta / 1000
       const jumpDuration = 0.6
@@ -610,13 +615,21 @@ export class GameScene extends Phaser.Scene {
     const balloonCenterX = balloon.x
     const distance = Math.abs(this.catX - balloonCenterX)
     
-    if (distance > 5) {
+    if (distance > 2) {
       this.catTargetX = balloonCenterX
-      const speed = 20
-      const moveTime = Math.min(distance / speed * 1000 / 60, 400)
       
-      this.time.delayedCall(moveTime, () => {
-        this.jumpToBalloon(balloonId)
+      this.tweens.add({
+        targets: { x: this.catX },
+        x: balloonCenterX,
+        duration: Math.min(distance * 10, 500),
+        ease: 'Linear',
+        onUpdate: (tween) => {
+          this.catX = (tween.targets[0] as any).x
+          this.drawCat(this.cat, this.catX, this.catY)
+        },
+        onComplete: () => {
+          this.jumpToBalloon(balloonId)
+        }
       })
     } else {
       this.jumpToBalloon(balloonId)
