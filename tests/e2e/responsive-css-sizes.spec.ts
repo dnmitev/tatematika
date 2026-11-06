@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { popCorrectBalloonAndWait } from './helpers'
 
 /**
  * Responsive CSS pixel size tests
@@ -166,15 +167,16 @@ test.describe('Responsive CSS Sizes - Mobile 375×667', () => {
     await page.reload()
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
     
-    // Complete level
+    // Complete level (5 stars) using the shared helper that waits for cat readiness
     for (let i = 0; i < 5; i++) {
-      const state = await page.evaluate(() => window.__tatematika!.getGameState())
-      const correct = state.balloons.find(b => b.isCorrect)!
-      await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correct.id)
-      await page.waitForTimeout(900)
+      await popCorrectBalloonAndWait(page)
     }
     
-    await page.waitForTimeout(500)
+    // Poll until level complete scene is visible
+    await expect.poll(async () => {
+      const levelText = await page.evaluate(() => window.__tatematika!.getLevelEndText())
+      return levelText !== null && levelText.includes('Ті успя')
+    }, { timeout: 5000, intervals: [50] }).toBe(true)
     
     // Check "Още веднъж" button
     const playAgainButton = page.locator('[data-testid="button-play-again"]')
