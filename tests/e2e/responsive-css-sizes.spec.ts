@@ -175,7 +175,7 @@ test.describe('Responsive CSS Sizes - Mobile 375×667', () => {
     // Poll until level complete scene is visible
     await expect.poll(async () => {
       const levelText = await page.evaluate(() => window.__tatematika!.getLevelEndText())
-      return levelText !== null && levelText.includes('Ті успя')
+      return levelText !== null && levelText.includes('Ти успя')
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
     // Check "Още веднъж" button
