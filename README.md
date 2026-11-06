@@ -71,8 +71,60 @@ interface TatematikaTestHook {
   
   // Get level completion text (null if not shown)
   getLevelEndText(): string | null
+  
+  // === Regression test hooks (added for review findings) ===
+  
+  // Get last played sound key (e.g., 'pop', 'bounce', 'meow')
+  // Returns null if no sound played or sound is muted
+  getLastPlayedSound(): string | null
+  
+  // Get formula font size in Phaser game-space pixels
+  // Must be ≥32px for spec §7 compliance (multiply by canvas scale for CSS px)
+  getFormulaFontSize(): number
+  
+  // Get mute button interactive bounds in game-space pixels
+  // Must be ≥64×64 for spec §3 compliance (multiply by canvas scale for CSS px)
+  getMuteButtonBounds(): { width: number; height: number }
+  
+  // Get cat's current position in game space
+  // Used to verify К8: cat moves under balloon on click/touch
+  getCatPosition(): { x: number; y: number }
+  
+  // Get balloon animation state for К4 verification
+  // isBouncing: true when balloon bounces on wrong answer
+  // isPopping: true when balloon pops on correct answer
+  getBalloonAnimationState(balloonId: string): { 
+    isBouncing: boolean
+    isPopping: boolean 
+  }
+  
+  // === Settings UI test hooks (К9, spec §5) ===
+  
+  // Open the parent settings UI
+  // Settings UI must be accessible per spec §5 "Настройки (за родителя)"
+  openSettings(): void
+  
+  // Close the settings UI
+  closeSettings(): void
+  
+  // Check if settings UI is currently open
+  isSettingsOpen(): boolean
 }
 ```
+
+### Required DOM test IDs for E2E tests
+
+The implementation must include these `data-testid` attributes:
+
+- `button-settings` - Opens parent settings UI (spec §5, К9)
+- `button-play-again` - "Още веднъж" button on level complete (К7)
+- `button-to-menu` - "Към менюто" button on level complete
+- `settings-panel` - The settings UI container
+- `setting-upper-limit` - Upper limit input (range 5-20)
+- `setting-operations` - Operations select (addition/subtraction/both)
+- `setting-balloon-count` - Balloon count input (range 2-5)
+- `setting-correct-per-level` - Correct balloons per level input (range 5-20)
+- `setting-speed` - Speed select (slow/medium)
 
 ## Test Coverage
 
