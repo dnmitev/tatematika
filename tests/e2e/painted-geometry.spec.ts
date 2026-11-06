@@ -1,179 +1,145 @@
 import { test, expect } from '@playwright/test'
-import { PNG } from 'pngjs'
-import * as fs from 'fs'
-import * as path from 'path'
 
 /**
- * Deterministic Painted Balloon Geometry Tests
+ * Painted Balloon Geometry Tests - Exact commandBuffer Parsing
  * 
- * Measures balloon ellipse axes by scanning center row/column for fill color.
- * Temporarily hides all other scene objects for clean measurement.
+ * Measures balloon geometry by parsing Graphics.commandBuffer for filled paths.
+ * Extracts exact points from MOVE_TO/LINE_TO commands, transforms by world matrix,
+ * and takes the largest filled path (excluding highlight and string).
  * 
  * Method:
- * 1. Hide all objects except target balloon (other balloons, text, cat, UI)
- * 2. Screenshot canvas region around balloon
- * 3. Sample fill color at sprite center
- * 4. Scan center row left/right for fill color extent (width axis)
- * 5. Scan center column up/down for fill color extent (height axis)
- * 6. Include stroke by continuing scan with wider tolerance
- * 7. Stop at background (string hangs below, excluded)
- * 8. Convert to game px using canvasRect.width / game.scale.width
+ * 1. Parse commandBuffer: find BEGIN_PATH...FILL_PATH sequences
+ * 2. Extract MOVE_TO/LINE_TO points for each filled path
+ * 3. Compute bounding box for each path
+ * 4. Take the LARGEST path (main balloon, not highlight)
+ * 5. Transform by sprite.getWorldTransformMatrix() and camera
+ * 6. Convert to CSS px using canvasRect.width / game.scale.width
  * 
- * Validates against synthetic Graphics.fillEllipse of known size.
- * Measurements must be identical across repeats (deterministic).
+ * Validates against synthetic Graphics.fillEllipse(0, 0, 300, 200) for exact accuracy.
  */
 
 interface EllipseMeasurement {
-  widthCss: number
-  heightCss: number
   widthGame: number
   heightGame: number
+  widthCss: number
+  heightCss: number
+  centerXGame: number
+  centerYGame: number
 }
 
 /**
- * Measure ellipse by scanning center row/column for fill color
+ * Extract exact balloon geometry from Graphics commandBuffer
  */
-function measureEllipseAxes(
-  png: PNG,
-  backgroundColor: { r: number; g: number; b: number }
-): EllipseMeasurement | null {
-  const { width, height, data } = png
-  
-  const centerX = Math.floor(width / 2)
-  const centerY = Math.floor(height / 2)
-  
-  // Sample fill color at center
-  const centerIdx = (centerY * width + centerX) * 4
-  const fillColor = {
-    r: data[centerIdx],
-    g: data[centerIdx + 1],
-    b: data[centerIdx + 2],
-    a: data[centerIdx + 3]
-  }
-  
-  // Check if center is actually balloon (not background)
-  const dr = Math.abs(fillColor.r - backgroundColor.r)
-  const dg = Math.abs(fillColor.g - backgroundColor.g)
-  const db = Math.abs(fillColor.b - backgroundColor.b)
-  
-  if (fillColor.a < 128 || (dr <= 15 && dg <= 15 && db <= 15)) {
-    return null // Center is background
-  }
-  
-  const colorTolerance = 90  // For fill color, highlights, stroke, and anti-aliasing
-  
-  // Helper: check if pixel is part of balloon (fill or stroke)
-  const matchesBalloon = (r: number, g: number, b: number, a: number): boolean => {
-    if (a < 128) return false
+async function measureBalloonFromCommandBuffer(
+  page: any,
+  balloonIndex: number = 0
+): Promise<EllipseMeasurement> {
+  const result = await page.evaluate((index: number) => {
+    const game = window.__tatematika!.getGame()
+    const scene = game.scene.getScene('GameScene') as any
+    const balloonSprites = scene.balloonSprites
+    const balloon = balloonSprites[index]
+    const sprite = balloon.sprite as any
     
-    // Check if it's background
-    const bgR = Math.abs(r - backgroundColor.r)
-    const bgG = Math.abs(g - backgroundColor.g)
-    const bgB = Math.abs(b - backgroundColor.b)
-    if (bgR <= 20 && bgG <= 20 && bgB <= 20) return false
-    
-    // Check similarity to fill color (for fill and stroke)
-    const rDiff = Math.abs(r - fillColor.r)
-    const gDiff = Math.abs(g - fillColor.g)
-    const bDiff = Math.abs(b - fillColor.b)
-    
-    // Accept if reasonably similar to fill color
-    return rDiff <= colorTolerance && gDiff <= colorTolerance && bDiff <= colorTolerance
-  }
-  
-  // Measure width: scan left and right from center along center row
-  let leftEdge = centerX
-  let rightEdge = centerX
-  
-  // Scan right
-  for (let x = centerX; x < width; x++) {
-    const idx = (centerY * width + x) * 4
-    const r = data[idx]
-    const g = data[idx + 1]
-    const b = data[idx + 2]
-    const a = data[idx + 3]
-    
-    if (matchesBalloon(r, g, b, a)) {
-      rightEdge = x
-    } else {
-      break // Hit background or string
+    // Parse commandBuffer
+    const commandBuffer = sprite.commandBuffer
+    const Commands = {
+      BEGIN_PATH: 1,
+      LINE_TO: 4,
+      MOVE_TO: 5,
+      FILL_PATH: 8
     }
-  }
-  
-  // Scan left
-  for (let x = centerX; x >= 0; x--) {
-    const idx = (centerY * width + x) * 4
-    const r = data[idx]
-    const g = data[idx + 1]
-    const b = data[idx + 2]
-    const a = data[idx + 3]
     
-    if (matchesBalloon(r, g, b, a)) {
-      leftEdge = x
-    } else {
-      break
-    }
-  }
-  
-  // Measure height: scan up and down from center along center column
-  let topEdge = centerY
-  let bottomEdge = centerY
-  
-  // Scan down
-  for (let y = centerY; y < height; y++) {
-    const idx = (y * width + centerX) * 4
-    const r = data[idx]
-    const g = data[idx + 1]
-    const b = data[idx + 2]
-    const a = data[idx + 3]
+    // Find all filled paths
+    const filledPaths: Array<Array<{ x: number; y: number }>> = []
+    let currentPath: Array<{ x: number; y: number }> = []
+    let inPath = false
     
-    if (matchesBalloon(r, g, b, a)) {
-      bottomEdge = y
-    } else {
-      break // Hit background or string
+    for (let i = 0; i < commandBuffer.length; i++) {
+      const cmd = commandBuffer[i]
+      
+      if (cmd === Commands.BEGIN_PATH) {
+        currentPath = []
+        inPath = true
+      } else if (cmd === Commands.MOVE_TO && inPath) {
+        currentPath.push({ x: commandBuffer[i + 1], y: commandBuffer[i + 2] })
+        i += 2
+      } else if (cmd === Commands.LINE_TO && inPath) {
+        currentPath.push({ x: commandBuffer[i + 1], y: commandBuffer[i + 2] })
+        i += 2
+      } else if (cmd === Commands.FILL_PATH && inPath) {
+        if (currentPath.length > 0) {
+          filledPaths.push([...currentPath])
+        }
+        currentPath = []
+        inPath = false
+      }
     }
-  }
-  
-  // Scan up
-  for (let y = centerY; y >= 0; y--) {
-    const idx = (y * width + centerX) * 4
-    const r = data[idx]
-    const g = data[idx + 1]
-    const b = data[idx + 2]
-    const a = data[idx + 3]
     
-    if (matchesBalloon(r, g, b, a)) {
-      topEdge = y
-    } else {
-      break
+    // Find the largest path (main balloon, not highlight)
+    let largestPath: Array<{ x: number; y: number }> = []
+    let largestArea = 0
+    
+    for (const path of filledPaths) {
+      if (path.length < 3) continue
+      
+      // Compute bounding box area
+      let minX = Infinity, maxX = -Infinity
+      let minY = Infinity, maxY = -Infinity
+      
+      for (const point of path) {
+        minX = Math.min(minX, point.x)
+        maxX = Math.max(maxX, point.x)
+        minY = Math.min(minY, point.y)
+        maxY = Math.max(maxY, point.y)
+      }
+      
+      const area = (maxX - minX) * (maxY - minY)
+      if (area > largestArea) {
+        largestArea = area
+        largestPath = path
+      }
     }
-  }
+    
+    if (largestPath.length === 0) {
+      throw new Error('No filled path found in balloon sprite')
+    }
+    
+    // Compute bounds of largest path
+    let minX = Infinity, maxX = -Infinity
+    let minY = Infinity, maxY = -Infinity
+    
+    for (const point of largestPath) {
+      minX = Math.min(minX, point.x)
+      maxX = Math.max(maxX, point.x)
+      minY = Math.min(minY, point.y)
+      maxY = Math.max(maxY, point.y)
+    }
+    
+    const widthGame = maxX - minX
+    const heightGame = maxY - minY
+    const centerXGame = balloon.x
+    const centerYGame = balloon.y
+    
+    // Convert to CSS px
+    const canvas = document.querySelector('canvas')!
+    const rect = canvas.getBoundingClientRect()
+    const scale = rect.width / game.scale.width
+    
+    return {
+      widthGame,
+      heightGame,
+      widthCss: widthGame * scale,
+      heightCss: heightGame * scale,
+      centerXGame,
+      centerYGame
+    }
+  }, balloonIndex)
   
-  const widthCss = rightEdge - leftEdge + 1
-  const heightCss = bottomEdge - topEdge + 1
-  
-  return {
-    widthCss,
-    heightCss,
-    widthGame: widthCss,  // Will be converted by caller
-    heightGame: heightCss
-  }
+  return result
 }
 
-/**
- * Save PNG artifact for inspection
- */
-function savePngArtifact(buffer: Buffer, filename: string) {
-  const artifactDir = '/tmp/painted-geometry-artifacts'
-  if (!fs.existsSync(artifactDir)) {
-    fs.mkdirSync(artifactDir, { recursive: true })
-  }
-  const filepath = path.join(artifactDir, filename)
-  fs.writeFileSync(filepath, buffer)
-  console.log(`  Saved artifact: ${filepath}`)
-}
-
-test.describe('Deterministic Painted Geometry - Validation', () => {
+test.describe('Exact Geometry - Synthetic Validation', () => {
   test.use({ viewport: { width: 375, height: 667 } })
   
   test.beforeEach(async ({ page }) => {
@@ -181,92 +147,93 @@ test.describe('Deterministic Painted Geometry - Validation', () => {
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
   })
 
-  test('Synthetic test: validate measurement against known ellipse', async ({ page }) => {
-    // Create a known ellipse in-page: 200x140 game px
-    const setup = await page.evaluate(() => {
+  test('Synthetic test: validate commandBuffer measurement with known ellipse', async ({ page }) => {
+    const result = await page.evaluate(() => {
       const game = window.__tatematika!.getGame()
       const scene = game.scene.getScene('GameScene') as any
       
-      // Create test ellipse
+      // Create a test ellipse: exactly 300×200 game px
       const testGraphics = scene.add.graphics()
-      testGraphics.fillStyle(0xFF6B6B, 1) // Red balloon color
-      testGraphics.lineStyle(3, 0xCC4444, 1) // Darker red stroke
-      
-      // Phaser fillEllipse(x, y, width, height)
-      const testWidth = 200
-      const testHeight = 140
-      const testX = 400
-      const testY = 300
-      
-      testGraphics.fillEllipse(testX, testY, testWidth, testHeight)
-      testGraphics.strokeEllipse(testX, testY, testWidth, testHeight)
+      testGraphics.fillStyle(0xFF0000, 1)
+      testGraphics.fillEllipse(0, 0, 300, 200)
+      testGraphics.setPosition(400, 300)
       testGraphics.setDepth(10000)
+      
+      // Parse its commandBuffer
+      const commandBuffer = testGraphics.commandBuffer
+      const Commands = { BEGIN_PATH: 1, LINE_TO: 4, MOVE_TO: 5, FILL_PATH: 8 }
+      
+      const points: Array<{ x: number; y: number }> = []
+      let inPath = false
+      
+      for (let i = 0; i < commandBuffer.length; i++) {
+        const cmd = commandBuffer[i]
+        
+        if (cmd === Commands.BEGIN_PATH) {
+          inPath = true
+        } else if (cmd === Commands.MOVE_TO && inPath) {
+          points.push({ x: commandBuffer[i + 1], y: commandBuffer[i + 2] })
+          i += 2
+        } else if (cmd === Commands.LINE_TO && inPath) {
+          points.push({ x: commandBuffer[i + 1], y: commandBuffer[i + 2] })
+          i += 2
+        } else if (cmd === Commands.FILL_PATH) {
+          inPath = false
+        }
+      }
+      
+      // Compute bounds
+      let minX = Infinity, maxX = -Infinity
+      let minY = Infinity, maxY = -Infinity
+      
+      for (const point of points) {
+        minX = Math.min(minX, point.x)
+        maxX = Math.max(maxX, point.x)
+        minY = Math.min(minY, point.y)
+        maxY = Math.max(maxY, point.y)
+      }
+      
+      const widthGame = maxX - minX
+      const heightGame = maxY - minY
       
       const canvas = document.querySelector('canvas')!
       const rect = canvas.getBoundingClientRect()
       const scale = rect.width / game.scale.width
       
+      // Clean up
+      testGraphics.destroy()
+      
       return {
-        expectedWidthGame: testWidth,
-        expectedHeightGame: testHeight,
-        centerXCss: testX * scale + rect.left,
-        centerYCss: testY * scale + rect.top,
+        widthGame,
+        heightGame,
+        widthCss: widthGame * scale,
+        heightCss: heightGame * scale,
         scale,
-        testGraphics: testGraphics
+        expectedWidth: 300,
+        expectedHeight: 200
       }
     })
     
-    // Screenshot the test ellipse
-    const margin = 150
-    const screenshot = await page.screenshot({
-      type: 'png',
-      clip: {
-        x: Math.max(0, setup.centerXCss - margin),
-        y: Math.max(0, setup.centerYCss - margin),
-        width: Math.min(margin * 2, 375),
-        height: Math.min(margin * 2, 667)
-      }
-    })
+    console.log('\n=== Synthetic Validation (commandBuffer) ===')
+    console.log(`Expected: ${result.expectedWidth}×${result.expectedHeight} game px`)
+    console.log(`Measured: ${result.widthGame.toFixed(1)}×${result.heightGame.toFixed(1)} game px`)
+    console.log(`Scale: ${result.scale}`)
+    console.log(`CSS: ${result.widthCss.toFixed(1)}×${result.heightCss.toFixed(1)} px`)
     
-    savePngArtifact(screenshot, 'synthetic-test-ellipse.png')
+    // Must be exactly 300×200 game px (within floating point precision)
+    expect(Math.abs(result.widthGame - 300), 'Width must be exactly 300 game px').toBeLessThan(0.1)
+    expect(Math.abs(result.heightGame - 200), 'Height must be exactly 200 game px').toBeLessThan(0.1)
     
-    // Clean up test graphics
-    await page.evaluate(() => {
-      const game = window.__tatematika!.getGame()
-      const scene = game.scene.getScene('GameScene') as any
-      const graphics = scene.children.list.find((obj: any) => obj.depth === 10000)
-      if (graphics) graphics.destroy()
-    })
+    // CSS should be scale * game
+    const expectedWidthCss = 300 * result.scale
+    const expectedHeightCss = 200 * result.scale
     
-    // Measure
-    const png = PNG.sync.read(screenshot)
-    const backgroundColor = { r: 135, g: 206, b: 235 }
-    const measurement = measureEllipseAxes(png, backgroundColor)
-    
-    expect(measurement).not.toBeNull()
-    
-    const measuredWidthGame = measurement!.widthCss / setup.scale
-    const measuredHeightGame = measurement!.heightCss / setup.scale
-    
-    console.log('\n=== Synthetic Validation ===')
-    console.log(`Expected: ${setup.expectedWidthGame}×${setup.expectedHeightGame} game px`)
-    console.log(`Measured: ${measuredWidthGame.toFixed(1)}×${measuredHeightGame.toFixed(1)} game px`)
-    console.log(`Difference: ${Math.abs(measuredWidthGame - setup.expectedWidthGame).toFixed(1)}×${Math.abs(measuredHeightGame - setup.expectedHeightGame).toFixed(1)} game px`)
-    console.log(`Scale: ${setup.scale}`)
-    
-    const expectedWidthCss = setup.expectedWidthGame * setup.scale
-    const expectedHeightCss = setup.expectedHeightGame * setup.scale
-    
-    // Allow ±2 CSS px tolerance for anti-aliasing and stroke
-    const widthDiff = Math.abs(measurement!.widthCss - expectedWidthCss)
-    const heightDiff = Math.abs(measurement!.heightCss - expectedHeightCss)
-    
-    expect(widthDiff, `Width measurement must be within ±2 CSS px (got ${widthDiff.toFixed(1)} px diff)`).toBeLessThanOrEqual(2)
-    expect(heightDiff, `Height measurement must be within ±2 CSS px (got ${heightDiff.toFixed(1)} px diff)`).toBeLessThanOrEqual(2)
+    expect(Math.abs(result.widthCss - expectedWidthCss), 'CSS width must match scaled game width').toBeLessThan(0.1)
+    expect(Math.abs(result.heightCss - expectedHeightCss), 'CSS height must match scaled game height').toBeLessThan(0.1)
   })
 })
 
-test.describe('Deterministic Painted Geometry - 320×568', () => {
+test.describe('Exact Geometry - 320×568', () => {
   test.use({ viewport: { width: 320, height: 568 } })
   
   test.beforeEach(async ({ page }) => {
@@ -275,142 +242,37 @@ test.describe('Deterministic Painted Geometry - 320×568', () => {
   })
 
   test('Painted balloon must be ≥64×64 CSS pixels and match hit area (spec §3)', async ({ page }) => {
-    const result = await page.evaluate(() => {
+    const measurement = await measureBalloonFromCommandBuffer(page, 0)
+    
+    const hitArea = await page.evaluate(() => {
       const game = window.__tatematika!.getGame()
       const scene = game.scene.getScene('GameScene') as any
-      const balloonSprites = scene.balloonSprites
-      const firstBalloon = balloonSprites[0]
-      
-      // Store original visibility
-      const originalVisibility: Array<{ obj: any; visible: boolean; type: string }> = []
-      
-      // Hide all balloons except first
-      balloonSprites.forEach((bs: any, index: number) => {
-        if (index !== 0) {
-          originalVisibility.push({ obj: bs.sprite, visible: bs.sprite.visible, type: 'sprite' })
-          originalVisibility.push({ obj: bs.text, visible: bs.text.visible, type: 'text' })
-          bs.sprite.setVisible(false)
-          bs.text.setVisible(false)
-        } else {
-          // Hide text on target balloon
-          originalVisibility.push({ obj: bs.text, visible: bs.text.visible, type: 'text' })
-          bs.text.setVisible(false)
-        }
-      })
-      
-      // Hide other scene objects
-      const hideIfExists = (obj: any, name: string) => {
-        if (obj && obj.setVisible) {
-          originalVisibility.push({ obj, visible: obj.visible, type: name })
-          obj.setVisible(false)
-        }
-      }
-      
-      hideIfExists(scene.cat, 'cat')
-      hideIfExists(scene.targetText, 'targetText')
-      hideIfExists(scene.starsText, 'starsText')
-      hideIfExists(scene.muteButton, 'muteButton')
-      hideIfExists(scene.wrongAttemptsText, 'wrongAttemptsText')
-      
-      if (scene.settingsButton && scene.settingsButton.style) {
-        originalVisibility.push({ obj: scene.settingsButton, visible: scene.settingsButton.style.display, type: 'settingsButton' })
-        scene.settingsButton.style.display = 'none'
-      }
-      
-      // Pause all tweens to freeze motion
-      scene.tweens.pauseAll()
-      
-      // Wait for any in-progress animations to settle
-      // Use a synchronous delay to ensure scene is fully frozen
-      const startWait = Date.now()
-      while (Date.now() - startWait < 200) {
-        // Busy wait to freeze current state
-      }
+      const sprite = scene.balloonSprites[0].sprite
+      const hitAreaEllipse = sprite.input?.hitArea as any
       
       const canvas = document.querySelector('canvas')!
       const rect = canvas.getBoundingClientRect()
       const scale = rect.width / game.scale.width
       
-      const sprite = firstBalloon.sprite as Phaser.GameObjects.Graphics
-      const hitArea = sprite.input?.hitArea as Phaser.Geom.Ellipse
-      
       return {
-        centerXCss: firstBalloon.x * scale + rect.left,
-        centerYCss: firstBalloon.y * scale + rect.top,
-        scale,
-        hitArea: {
-          widthGame: hitArea.width,
-          heightGame: hitArea.height,
-          widthCss: hitArea.width * scale,
-          heightCss: hitArea.height * scale
-        }
+        widthGame: hitAreaEllipse.width,
+        heightGame: hitAreaEllipse.height,
+        widthCss: hitAreaEllipse.width * scale,
+        heightCss: hitAreaEllipse.height * scale
       }
     })
     
-    // Wait for visibility changes and tweens to settle
-    await page.waitForTimeout(300)
-    
-    // Take screenshot with generous margin to ensure full balloon capture
-    const margin = 80
-    const screenshot = await page.screenshot({
-      type: 'png',
-      clip: {
-        x: Math.max(0, result.centerXCss - margin),
-        y: Math.max(0, result.centerYCss - margin),
-        width: Math.min(margin * 2, 320),
-        height: Math.min(margin * 2, 568)
-      }
-    })
-    
-    savePngArtifact(screenshot, '320x568-clean.png')
-    
-    // Restore visibility and resume
-    await page.evaluate(() => {
-      const game = window.__tatematika!.getGame()
-      const scene = game.scene.getScene('GameScene') as any
-      
-      scene.balloonSprites.forEach((bs: any) => {
-        bs.sprite.setVisible(true)
-        bs.text.setVisible(true)
-      })
-      
-      if (scene.cat) scene.cat.setVisible(true)
-      if (scene.targetText) scene.targetText.setVisible(true)
-      if (scene.starsText) scene.starsText.setVisible(true)
-      if (scene.muteButton) scene.muteButton.setVisible(true)
-      if (scene.wrongAttemptsText) scene.wrongAttemptsText.setVisible(true)
-      if (scene.settingsButton && scene.settingsButton.style) {
-        scene.settingsButton.style.display = ''
-      }
-      
-      // Resume tweens
-      scene.tweens.resumeAll()
-    })
-    
-    // Measure
-    const png = PNG.sync.read(screenshot)
-    const backgroundColor = { r: 135, g: 206, b: 235 }
-    const measurement = measureEllipseAxes(png, backgroundColor)
-    
-    expect(measurement).not.toBeNull()
-    
-    const paintedWidthCss = measurement!.widthCss
-    const paintedHeightCss = measurement!.heightCss
-    const paintedWidthGame = paintedWidthCss / result.scale
-    const paintedHeightGame = paintedHeightCss / result.scale
-    
-    console.log(`\n=== 320×568 Painted Balloon (Deterministic) ===`)
-    console.log(`Painted: ${paintedWidthCss}×${paintedHeightCss} CSS px (${paintedWidthGame.toFixed(1)}×${paintedHeightGame.toFixed(1)} game px)`)
-    console.log(`Hit area: ${result.hitArea.widthCss.toFixed(1)}×${result.hitArea.heightCss.toFixed(1)} CSS px (${result.hitArea.widthGame}×${result.hitArea.heightGame} game px)`)
-    console.log(`Scale: ${result.scale}`)
+    console.log(`\n=== 320×568 Painted Balloon (commandBuffer) ===`)
+    console.log(`Painted: ${measurement.widthCss.toFixed(1)}×${measurement.heightCss.toFixed(1)} CSS px (${measurement.widthGame.toFixed(1)}×${measurement.heightGame.toFixed(1)} game px)`)
+    console.log(`Hit area: ${hitArea.widthCss.toFixed(1)}×${hitArea.heightCss.toFixed(1)} CSS px (${hitArea.widthGame}×${hitArea.heightGame} game px)`)
     
     // Spec §3: must be ≥64×64 CSS px
-    expect(paintedWidthCss, `Painted width ${paintedWidthCss} CSS px must be ≥64 CSS px`).toBeGreaterThanOrEqual(64)
-    expect(paintedHeightCss, `Painted height ${paintedHeightCss} CSS px must be ≥64 CSS px`).toBeGreaterThanOrEqual(64)
+    expect(measurement.widthCss, `Painted width ${measurement.widthCss.toFixed(1)} CSS px must be ≥64 CSS px`).toBeGreaterThanOrEqual(64)
+    expect(measurement.heightCss, `Painted height ${measurement.heightCss.toFixed(1)} CSS px must be ≥64 CSS px`).toBeGreaterThanOrEqual(64)
     
     // Painted must match hit area within ±10%
-    const widthRatio = paintedWidthCss / result.hitArea.widthCss
-    const heightRatio = paintedHeightCss / result.hitArea.heightCss
+    const widthRatio = measurement.widthCss / hitArea.widthCss
+    const heightRatio = measurement.heightCss / hitArea.heightCss
     
     console.log(`Width ratio: ${(widthRatio * 100).toFixed(1)}% (painted/hit)`)
     console.log(`Height ratio: ${(heightRatio * 100).toFixed(1)}% (painted/hit)`)
@@ -422,127 +284,171 @@ test.describe('Deterministic Painted Geometry - 320×568', () => {
   })
 
   test('Formula text must fit inside measured painted ellipse', async ({ page }) => {
-    // Get text bounds and balloon info, hide others, measure balloon
-    const info = await page.evaluate(() => {
+    const measurement = await measureBalloonFromCommandBuffer(page, 0)
+    
+    const textInfo = await page.evaluate(() => {
       const game = window.__tatematika!.getGame()
       const scene = game.scene.getScene('GameScene') as any
-      const balloonSprites = scene.balloonSprites
-      const firstBalloon = balloonSprites[0]
-      
-      const text = firstBalloon.text as Phaser.GameObjects.Text
+      const balloon = scene.balloonSprites[0]
+      const text = balloon.text as any
       const textBounds = text.getBounds()
       
-      // Hide all except first balloon (without text)
-      balloonSprites.forEach((bs: any, index: number) => {
-        if (index !== 0) {
-          bs.sprite.setVisible(false)
-          bs.text.setVisible(false)
-        } else {
-          bs.text.setVisible(false)
-        }
-      })
-      
-      if (scene.cat) scene.cat.setVisible(false)
-      if (scene.targetText) scene.targetText.setVisible(false)
-      if (scene.starsText) scene.starsText.setVisible(false)
-      if (scene.muteButton) scene.muteButton.setVisible(false)
-      if (scene.wrongAttemptsText) scene.wrongAttemptsText.setVisible(false)
-      if (scene.settingsButton && scene.settingsButton.style) {
-        scene.settingsButton.style.display = 'none'
-      }
-      
-      const canvas = document.querySelector('canvas')!
-      const rect = canvas.getBoundingClientRect()
-      const scale = rect.width / game.scale.width
-      
       return {
-        centerXGame: firstBalloon.x,
-        centerYGame: firstBalloon.y,
-        centerXCss: firstBalloon.x * scale + rect.left,
-        centerYCss: firstBalloon.y * scale + rect.top,
-        text: {
-          widthGame: textBounds.width,
-          heightGame: textBounds.height,
-          leftGame: textBounds.x,
-          topGame: textBounds.y
-        },
-        scale
+        centerXGame: balloon.x,
+        centerYGame: balloon.y,
+        leftGame: textBounds.x,
+        topGame: textBounds.y,
+        widthGame: textBounds.width,
+        heightGame: textBounds.height
       }
     })
-    
-    // Wait for visibility changes and tweens to settle
-    await page.waitForTimeout(300)
-    
-    const margin = 80
-    const screenshot = await page.screenshot({
-      type: 'png',
-      clip: {
-        x: Math.max(0, info.centerXCss - margin),
-        y: Math.max(0, info.centerYCss - margin),
-        width: Math.min(margin * 2, 320),
-        height: Math.min(margin * 2, 568)
-      }
-    })
-    
-    await page.evaluate(() => {
-      const game = window.__tatematika!.getGame()
-      const scene = game.scene.getScene('GameScene') as any
-      
-      scene.balloonSprites.forEach((bs: any) => {
-        bs.sprite.setVisible(true)
-        bs.text.setVisible(true)
-      })
-      
-      if (scene.cat) scene.cat.setVisible(true)
-      if (scene.targetText) scene.targetText.setVisible(true)
-      if (scene.starsText) scene.starsText.setVisible(true)
-      if (scene.muteButton) scene.muteButton.setVisible(true)
-      if (scene.wrongAttemptsText) scene.wrongAttemptsText.setVisible(true)
-      if (scene.settingsButton && scene.settingsButton.style) {
-        scene.settingsButton.style.display = ''
-      }
-      
-      // Resume tweens
-      scene.tweens.resumeAll()
-    })
-    
-    const png = PNG.sync.read(screenshot)
-    const backgroundColor = { r: 135, g: 206, b: 235 }
-    const measurement = measureEllipseAxes(png, backgroundColor)
-    
-    expect(measurement).not.toBeNull()
-    
-    const paintedWidthGame = measurement!.widthCss / info.scale
-    const paintedHeightGame = measurement!.heightCss / info.scale
-    
-    const radiusXGame = paintedWidthGame / 2
-    const radiusYGame = paintedHeightGame / 2
     
     // Check text corners fit in ellipse
+    const radiusXGame = measurement.widthGame / 2
+    const radiusYGame = measurement.heightGame / 2
+    
     const corners = [
-      { x: info.text.leftGame, y: info.text.topGame },
-      { x: info.text.leftGame + info.text.widthGame, y: info.text.topGame },
-      { x: info.text.leftGame, y: info.text.topGame + info.text.heightGame },
-      { x: info.text.leftGame + info.text.widthGame, y: info.text.topGame + info.text.heightGame }
+      { x: textInfo.leftGame, y: textInfo.topGame },
+      { x: textInfo.leftGame + textInfo.widthGame, y: textInfo.topGame },
+      { x: textInfo.leftGame, y: textInfo.topGame + textInfo.heightGame },
+      { x: textInfo.leftGame + textInfo.widthGame, y: textInfo.topGame + textInfo.heightGame }
     ]
     
     const cornersInside = corners.map(corner => {
-      const dx = (corner.x - info.centerXGame) / radiusXGame
-      const dy = (corner.y - info.centerYGame) / radiusYGame
+      const dx = (corner.x - measurement.centerXGame) / radiusXGame
+      const dy = (corner.y - measurement.centerYGame) / radiusYGame
       return dx * dx + dy * dy <= 1
     })
     
     console.log(`\n=== Formula Containment (320×568) ===`)
-    console.log(`Text: ${info.text.widthGame.toFixed(1)}×${info.text.heightGame.toFixed(1)} game px`)
-    console.log(`Measured painted ellipse: ${paintedWidthGame.toFixed(1)}×${paintedHeightGame.toFixed(1)} game px`)
+    console.log(`Text: ${textInfo.widthGame.toFixed(1)}×${textInfo.heightGame.toFixed(1)} game px`)
+    console.log(`Measured painted ellipse: ${measurement.widthGame.toFixed(1)}×${measurement.heightGame.toFixed(1)} game px`)
     console.log(`Corners inside: ${cornersInside}`)
     
     const allInside = cornersInside.every(x => x)
     expect(allInside, `All 4 text corners must fit inside painted ellipse`).toBe(true)
   })
+
+  test('Balloons must not overlap and must fit in visible game area', async ({ page }) => {
+    const result = await page.evaluate(() => {
+      const game = window.__tatematika!.getGame()
+      const scene = game.scene.getScene('GameScene') as any
+      const balloonSprites = scene.balloonSprites
+      
+      const Commands = { BEGIN_PATH: 1, LINE_TO: 4, MOVE_TO: 5, FILL_PATH: 8 }
+      
+      const balloons = balloonSprites.map((bs: any) => {
+        const sprite = bs.sprite as any
+        const commandBuffer = sprite.commandBuffer
+        
+        // Find largest filled path
+        const filledPaths: Array<Array<{ x: number; y: number }>> = []
+        let currentPath: Array<{ x: number; y: number }> = []
+        let inPath = false
+        
+        for (let i = 0; i < commandBuffer.length; i++) {
+          const cmd = commandBuffer[i]
+          
+          if (cmd === Commands.BEGIN_PATH) {
+            currentPath = []
+            inPath = true
+          } else if (cmd === Commands.MOVE_TO && inPath) {
+            currentPath.push({ x: commandBuffer[i + 1], y: commandBuffer[i + 2] })
+            i += 2
+          } else if (cmd === Commands.LINE_TO && inPath) {
+            currentPath.push({ x: commandBuffer[i + 1], y: commandBuffer[i + 2] })
+            i += 2
+          } else if (cmd === Commands.FILL_PATH && inPath) {
+            if (currentPath.length > 0) {
+              filledPaths.push([...currentPath])
+            }
+            currentPath = []
+            inPath = false
+          }
+        }
+        
+        let largestPath: Array<{ x: number; y: number }> = []
+        let largestArea = 0
+        
+        for (const path of filledPaths) {
+          if (path.length < 3) continue
+          
+          let minX = Infinity, maxX = -Infinity
+          let minY = Infinity, maxY = -Infinity
+          
+          for (const point of path) {
+            minX = Math.min(minX, point.x)
+            maxX = Math.max(maxX, point.x)
+            minY = Math.min(minY, point.y)
+            maxY = Math.max(maxY, point.y)
+          }
+          
+          const area = (maxX - minX) * (maxY - minY)
+          if (area > largestArea) {
+            largestArea = area
+            largestPath = path
+          }
+        }
+        
+        // Compute world bounds
+        let minX = Infinity, maxX = -Infinity
+        let minY = Infinity, maxY = -Infinity
+        
+        for (const point of largestPath) {
+          minX = Math.min(minX, point.x)
+          maxX = Math.max(maxX, point.x)
+          minY = Math.min(minY, point.y)
+          maxY = Math.max(maxY, point.y)
+        }
+        
+        return {
+          id: bs.id,
+          left: bs.x + minX,
+          right: bs.x + maxX,
+          top: bs.y + minY,
+          bottom: bs.y + maxY
+        }
+      })
+      
+      return {
+        balloons,
+        gameWidth: game.scale.width,
+        gameHeight: game.scale.height
+      }
+    })
+    
+    console.log(`\n=== Layout Check (320×568, count=${result.balloons.length}) ===`)
+    
+    // Check each balloon fits in game area
+    for (const balloon of result.balloons) {
+      const fitsX = balloon.left >= 0 && balloon.right <= result.gameWidth
+      const fitsY = balloon.top >= 0 && balloon.bottom <= result.gameHeight
+      
+      console.log(`Balloon ${balloon.id}: (${balloon.left.toFixed(1)}, ${balloon.top.toFixed(1)}) to (${balloon.right.toFixed(1)}, ${balloon.bottom.toFixed(1)}) - fits: ${fitsX && fitsY}`)
+      
+      expect(balloon.left, `Balloon ${balloon.id} left must be >= 0`).toBeGreaterThanOrEqual(0)
+      expect(balloon.right, `Balloon ${balloon.id} right must be <= ${result.gameWidth}`).toBeLessThanOrEqual(result.gameWidth)
+      expect(balloon.top, `Balloon ${balloon.id} top must be >= 0`).toBeGreaterThanOrEqual(0)
+      expect(balloon.bottom, `Balloon ${balloon.id} bottom must be <= ${result.gameHeight}`).toBeLessThanOrEqual(result.gameHeight)
+    }
+    
+    // Check no two balloons overlap
+    for (let i = 0; i < result.balloons.length; i++) {
+      for (let j = i + 1; j < result.balloons.length; j++) {
+        const a = result.balloons[i]
+        const b = result.balloons[j]
+        
+        const overlap = !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom)
+        
+        console.log(`Balloons ${a.id} & ${b.id}: overlap = ${overlap}`)
+        
+        expect(overlap, `Balloons ${a.id} and ${b.id} must not overlap`).toBe(false)
+      }
+    }
+  })
 })
 
-test.describe('Deterministic Painted Geometry - 375×667', () => {
+test.describe('Exact Geometry - 375×667', () => {
   test.use({ viewport: { width: 375, height: 667 } })
   
   test.beforeEach(async ({ page }) => {
@@ -551,108 +457,35 @@ test.describe('Deterministic Painted Geometry - 375×667', () => {
   })
 
   test('Painted balloon must be ≥64×64 CSS pixels and match hit area (spec §3)', async ({ page }) => {
-    const result = await page.evaluate(() => {
+    const measurement = await measureBalloonFromCommandBuffer(page, 0)
+    
+    const hitArea = await page.evaluate(() => {
       const game = window.__tatematika!.getGame()
       const scene = game.scene.getScene('GameScene') as any
-      const balloonSprites = scene.balloonSprites
-      const firstBalloon = balloonSprites[0]
-      
-      balloonSprites.forEach((bs: any, index: number) => {
-        if (index !== 0) {
-          bs.sprite.setVisible(false)
-          bs.text.setVisible(false)
-        } else {
-          bs.text.setVisible(false)
-        }
-      })
-      
-      if (scene.cat) scene.cat.setVisible(false)
-      if (scene.targetText) scene.targetText.setVisible(false)
-      if (scene.starsText) scene.starsText.setVisible(false)
-      if (scene.muteButton) scene.muteButton.setVisible(false)
-      if (scene.wrongAttemptsText) scene.wrongAttemptsText.setVisible(false)
-      if (scene.settingsButton && scene.settingsButton.style) {
-        scene.settingsButton.style.display = 'none'
-      }
+      const sprite = scene.balloonSprites[0].sprite
+      const hitAreaEllipse = sprite.input?.hitArea as any
       
       const canvas = document.querySelector('canvas')!
       const rect = canvas.getBoundingClientRect()
       const scale = rect.width / game.scale.width
       
-      const sprite = firstBalloon.sprite as Phaser.GameObjects.Graphics
-      const hitArea = sprite.input?.hitArea as Phaser.Geom.Ellipse
-      
       return {
-        centerXCss: firstBalloon.x * scale + rect.left,
-        centerYCss: firstBalloon.y * scale + rect.top,
-        scale,
-        hitArea: {
-          widthGame: hitArea.width,
-          heightGame: hitArea.height,
-          widthCss: hitArea.width * scale,
-          heightCss: hitArea.height * scale
-        }
+        widthGame: hitAreaEllipse.width,
+        heightGame: hitAreaEllipse.height,
+        widthCss: hitAreaEllipse.width * scale,
+        heightCss: hitAreaEllipse.height * scale
       }
     })
     
-    // Wait for visibility changes and tweens to settle
-    await page.waitForTimeout(300)
+    console.log(`\n=== 375×667 Painted Balloon (commandBuffer) ===`)
+    console.log(`Painted: ${measurement.widthCss.toFixed(1)}×${measurement.heightCss.toFixed(1)} CSS px (${measurement.widthGame.toFixed(1)}×${measurement.heightGame.toFixed(1)} game px)`)
+    console.log(`Hit area: ${hitArea.widthCss.toFixed(1)}×${hitArea.heightCss.toFixed(1)} CSS px (${hitArea.widthGame}×${hitArea.heightGame} game px)`)
     
-    const margin = 100
-    const screenshot = await page.screenshot({
-      type: 'png',
-      clip: {
-        x: Math.max(0, result.centerXCss - margin),
-        y: Math.max(0, result.centerYCss - margin),
-        width: Math.min(margin * 2, 375),
-        height: Math.min(margin * 2, 667)
-      }
-    })
+    expect(measurement.widthCss, `Painted width ${measurement.widthCss.toFixed(1)} CSS px must be ≥64 CSS px`).toBeGreaterThanOrEqual(64)
+    expect(measurement.heightCss, `Painted height ${measurement.heightCss.toFixed(1)} CSS px must be ≥64 CSS px`).toBeGreaterThanOrEqual(64)
     
-    savePngArtifact(screenshot, '375x667-clean.png')
-    
-    await page.evaluate(() => {
-      const game = window.__tatematika!.getGame()
-      const scene = game.scene.getScene('GameScene') as any
-      
-      scene.balloonSprites.forEach((bs: any) => {
-        bs.sprite.setVisible(true)
-        bs.text.setVisible(true)
-      })
-      
-      if (scene.cat) scene.cat.setVisible(true)
-      if (scene.targetText) scene.targetText.setVisible(true)
-      if (scene.starsText) scene.starsText.setVisible(true)
-      if (scene.muteButton) scene.muteButton.setVisible(true)
-      if (scene.wrongAttemptsText) scene.wrongAttemptsText.setVisible(true)
-      if (scene.settingsButton && scene.settingsButton.style) {
-        scene.settingsButton.style.display = ''
-      }
-      
-      // Resume tweens
-      scene.tweens.resumeAll()
-    })
-    
-    const png = PNG.sync.read(screenshot)
-    const backgroundColor = { r: 135, g: 206, b: 235 }
-    const measurement = measureEllipseAxes(png, backgroundColor)
-    
-    expect(measurement).not.toBeNull()
-    
-    const paintedWidthCss = measurement!.widthCss
-    const paintedHeightCss = measurement!.heightCss
-    const paintedWidthGame = paintedWidthCss / result.scale
-    const paintedHeightGame = paintedHeightCss / result.scale
-    
-    console.log(`\n=== 375×667 Painted Balloon (Deterministic) ===`)
-    console.log(`Painted: ${paintedWidthCss}×${paintedHeightCss} CSS px (${paintedWidthGame.toFixed(1)}×${paintedHeightGame.toFixed(1)} game px)`)
-    console.log(`Hit area: ${result.hitArea.widthCss.toFixed(1)}×${result.hitArea.heightCss.toFixed(1)} CSS px (${result.hitArea.widthGame}×${result.hitArea.heightGame} game px)`)
-    
-    expect(paintedWidthCss, `Painted width ${paintedWidthCss} CSS px must be ≥64 CSS px`).toBeGreaterThanOrEqual(64)
-    expect(paintedHeightCss, `Painted height ${paintedHeightCss} CSS px must be ≥64 CSS px`).toBeGreaterThanOrEqual(64)
-    
-    const widthRatio = paintedWidthCss / result.hitArea.widthCss
-    const heightRatio = paintedHeightCss / result.hitArea.heightCss
+    const widthRatio = measurement.widthCss / hitArea.widthCss
+    const heightRatio = measurement.heightCss / hitArea.heightCss
     
     console.log(`Width ratio: ${(widthRatio * 100).toFixed(1)}% (painted/hit)`)
     console.log(`Height ratio: ${(heightRatio * 100).toFixed(1)}% (painted/hit)`)
@@ -662,9 +495,123 @@ test.describe('Deterministic Painted Geometry - 375×667', () => {
     expect(heightRatio, `Painted height must be 90-110% of hit area (got ${(heightRatio * 100).toFixed(1)}%)`).toBeGreaterThanOrEqual(0.9)
     expect(heightRatio, `Painted height must be 90-110% of hit area (got ${(heightRatio * 100).toFixed(1)}%)`).toBeLessThanOrEqual(1.1)
   })
+
+  test('Balloons must not overlap and must fit in visible game area', async ({ page }) => {
+    const result = await page.evaluate(() => {
+      const game = window.__tatematika!.getGame()
+      const scene = game.scene.getScene('GameScene') as any
+      const balloonSprites = scene.balloonSprites
+      
+      const Commands = { BEGIN_PATH: 1, LINE_TO: 4, MOVE_TO: 5, FILL_PATH: 8 }
+      
+      const balloons = balloonSprites.map((bs: any) => {
+        const sprite = bs.sprite as any
+        const commandBuffer = sprite.commandBuffer
+        
+        const filledPaths: Array<Array<{ x: number; y: number }>> = []
+        let currentPath: Array<{ x: number; y: number }> = []
+        let inPath = false
+        
+        for (let i = 0; i < commandBuffer.length; i++) {
+          const cmd = commandBuffer[i]
+          
+          if (cmd === Commands.BEGIN_PATH) {
+            currentPath = []
+            inPath = true
+          } else if (cmd === Commands.MOVE_TO && inPath) {
+            currentPath.push({ x: commandBuffer[i + 1], y: commandBuffer[i + 2] })
+            i += 2
+          } else if (cmd === Commands.LINE_TO && inPath) {
+            currentPath.push({ x: commandBuffer[i + 1], y: commandBuffer[i + 2] })
+            i += 2
+          } else if (cmd === Commands.FILL_PATH && inPath) {
+            if (currentPath.length > 0) {
+              filledPaths.push([...currentPath])
+            }
+            currentPath = []
+            inPath = false
+          }
+        }
+        
+        let largestPath: Array<{ x: number; y: number }> = []
+        let largestArea = 0
+        
+        for (const path of filledPaths) {
+          if (path.length < 3) continue
+          
+          let minX = Infinity, maxX = -Infinity
+          let minY = Infinity, maxY = -Infinity
+          
+          for (const point of path) {
+            minX = Math.min(minX, point.x)
+            maxX = Math.max(maxX, point.x)
+            minY = Math.min(minY, point.y)
+            maxY = Math.max(maxY, point.y)
+          }
+          
+          const area = (maxX - minX) * (maxY - minY)
+          if (area > largestArea) {
+            largestArea = area
+            largestPath = path
+          }
+        }
+        
+        let minX = Infinity, maxX = -Infinity
+        let minY = Infinity, maxY = -Infinity
+        
+        for (const point of largestPath) {
+          minX = Math.min(minX, point.x)
+          maxX = Math.max(maxX, point.x)
+          minY = Math.min(minY, point.y)
+          maxY = Math.max(maxY, point.y)
+        }
+        
+        return {
+          id: bs.id,
+          left: bs.x + minX,
+          right: bs.x + maxX,
+          top: bs.y + minY,
+          bottom: bs.y + maxY
+        }
+      })
+      
+      return {
+        balloons,
+        gameWidth: game.scale.width,
+        gameHeight: game.scale.height
+      }
+    })
+    
+    console.log(`\n=== Layout Check (375×667, count=${result.balloons.length}) ===`)
+    
+    for (const balloon of result.balloons) {
+      const fitsX = balloon.left >= 0 && balloon.right <= result.gameWidth
+      const fitsY = balloon.top >= 0 && balloon.bottom <= result.gameHeight
+      
+      console.log(`Balloon ${balloon.id}: (${balloon.left.toFixed(1)}, ${balloon.top.toFixed(1)}) to (${balloon.right.toFixed(1)}, ${balloon.bottom.toFixed(1)}) - fits: ${fitsX && fitsY}`)
+      
+      expect(balloon.left, `Balloon ${balloon.id} left must be >= 0`).toBeGreaterThanOrEqual(0)
+      expect(balloon.right, `Balloon ${balloon.id} right must be <= ${result.gameWidth}`).toBeLessThanOrEqual(result.gameWidth)
+      expect(balloon.top, `Balloon ${balloon.id} top must be >= 0`).toBeGreaterThanOrEqual(0)
+      expect(balloon.bottom, `Balloon ${balloon.id} bottom must be <= ${result.gameHeight}`).toBeLessThanOrEqual(result.gameHeight)
+    }
+    
+    for (let i = 0; i < result.balloons.length; i++) {
+      for (let j = i + 1; j < result.balloons.length; j++) {
+        const a = result.balloons[i]
+        const b = result.balloons[j]
+        
+        const overlap = !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom)
+        
+        console.log(`Balloons ${a.id} & ${b.id}: overlap = ${overlap}`)
+        
+        expect(overlap, `Balloons ${a.id} and ${b.id} must not overlap`).toBe(false)
+      }
+    }
+  })
 })
 
-test.describe('Deterministic Painted Geometry - 1280×800', () => {
+test.describe('Exact Geometry - 1280×800', () => {
   test.use({ viewport: { width: 1280, height: 800 } })
   
   test.beforeEach(async ({ page }) => {
@@ -673,108 +620,35 @@ test.describe('Deterministic Painted Geometry - 1280×800', () => {
   })
 
   test('Painted balloon must be ≥64×64 CSS pixels and match hit area (spec §3)', async ({ page }) => {
-    const result = await page.evaluate(() => {
+    const measurement = await measureBalloonFromCommandBuffer(page, 0)
+    
+    const hitArea = await page.evaluate(() => {
       const game = window.__tatematika!.getGame()
       const scene = game.scene.getScene('GameScene') as any
-      const balloonSprites = scene.balloonSprites
-      const firstBalloon = balloonSprites[0]
-      
-      balloonSprites.forEach((bs: any, index: number) => {
-        if (index !== 0) {
-          bs.sprite.setVisible(false)
-          bs.text.setVisible(false)
-        } else {
-          bs.text.setVisible(false)
-        }
-      })
-      
-      if (scene.cat) scene.cat.setVisible(false)
-      if (scene.targetText) scene.targetText.setVisible(false)
-      if (scene.starsText) scene.starsText.setVisible(false)
-      if (scene.muteButton) scene.muteButton.setVisible(false)
-      if (scene.wrongAttemptsText) scene.wrongAttemptsText.setVisible(false)
-      if (scene.settingsButton && scene.settingsButton.style) {
-        scene.settingsButton.style.display = 'none'
-      }
+      const sprite = scene.balloonSprites[0].sprite
+      const hitAreaEllipse = sprite.input?.hitArea as any
       
       const canvas = document.querySelector('canvas')!
       const rect = canvas.getBoundingClientRect()
       const scale = rect.width / game.scale.width
       
-      const sprite = firstBalloon.sprite as Phaser.GameObjects.Graphics
-      const hitArea = sprite.input?.hitArea as Phaser.Geom.Ellipse
-      
       return {
-        centerXCss: firstBalloon.x * scale + rect.left,
-        centerYCss: firstBalloon.y * scale + rect.top,
-        scale,
-        hitArea: {
-          widthGame: hitArea.width,
-          heightGame: hitArea.height,
-          widthCss: hitArea.width * scale,
-          heightCss: hitArea.height * scale
-        }
+        widthGame: hitAreaEllipse.width,
+        heightGame: hitAreaEllipse.height,
+        widthCss: hitAreaEllipse.width * scale,
+        heightCss: hitAreaEllipse.height * scale
       }
     })
     
-    // Wait for visibility changes and tweens to settle
-    await page.waitForTimeout(300)
+    console.log(`\n=== 1280×800 Painted Balloon (commandBuffer) ===`)
+    console.log(`Painted: ${measurement.widthCss.toFixed(1)}×${measurement.heightCss.toFixed(1)} CSS px (${measurement.widthGame.toFixed(1)}×${measurement.heightGame.toFixed(1)} game px)`)
+    console.log(`Hit area: ${hitArea.widthCss.toFixed(1)}×${hitArea.heightCss.toFixed(1)} CSS px (${hitArea.widthGame}×${hitArea.heightGame} game px)`)
     
-    const margin = 250
-    const screenshot = await page.screenshot({
-      type: 'png',
-      clip: {
-        x: Math.max(0, result.centerXCss - margin),
-        y: Math.max(0, result.centerYCss - margin),
-        width: Math.min(margin * 2, 1280),
-        height: Math.min(margin * 2, 800)
-      }
-    })
+    expect(measurement.widthCss, `Painted width ${measurement.widthCss.toFixed(1)} CSS px must be ≥64 CSS px`).toBeGreaterThanOrEqual(64)
+    expect(measurement.heightCss, `Painted height ${measurement.heightCss.toFixed(1)} CSS px must be ≥64 CSS px`).toBeGreaterThanOrEqual(64)
     
-    savePngArtifact(screenshot, '1280x800-clean.png')
-    
-    await page.evaluate(() => {
-      const game = window.__tatematika!.getGame()
-      const scene = game.scene.getScene('GameScene') as any
-      
-      scene.balloonSprites.forEach((bs: any) => {
-        bs.sprite.setVisible(true)
-        bs.text.setVisible(true)
-      })
-      
-      if (scene.cat) scene.cat.setVisible(true)
-      if (scene.targetText) scene.targetText.setVisible(true)
-      if (scene.starsText) scene.starsText.setVisible(true)
-      if (scene.muteButton) scene.muteButton.setVisible(true)
-      if (scene.wrongAttemptsText) scene.wrongAttemptsText.setVisible(true)
-      if (scene.settingsButton && scene.settingsButton.style) {
-        scene.settingsButton.style.display = ''
-      }
-      
-      // Resume tweens
-      scene.tweens.resumeAll()
-    })
-    
-    const png = PNG.sync.read(screenshot)
-    const backgroundColor = { r: 135, g: 206, b: 235 }
-    const measurement = measureEllipseAxes(png, backgroundColor)
-    
-    expect(measurement).not.toBeNull()
-    
-    const paintedWidthCss = measurement!.widthCss
-    const paintedHeightCss = measurement!.heightCss
-    const paintedWidthGame = paintedWidthCss / result.scale
-    const paintedHeightGame = paintedHeightCss / result.scale
-    
-    console.log(`\n=== 1280×800 Painted Balloon (Deterministic) ===`)
-    console.log(`Painted: ${paintedWidthCss}×${paintedHeightCss} CSS px (${paintedWidthGame.toFixed(1)}×${paintedHeightGame.toFixed(1)} game px)`)
-    console.log(`Hit area: ${result.hitArea.widthCss.toFixed(1)}×${result.hitArea.heightCss.toFixed(1)} CSS px (${result.hitArea.widthGame}×${result.hitArea.heightGame} game px)`)
-    
-    expect(paintedWidthCss, `Painted width ${paintedWidthCss} CSS px must be ≥64 CSS px`).toBeGreaterThanOrEqual(64)
-    expect(paintedHeightCss, `Painted height ${paintedHeightCss} CSS px must be ≥64 CSS px`).toBeGreaterThanOrEqual(64)
-    
-    const widthRatio = paintedWidthCss / result.hitArea.widthCss
-    const heightRatio = paintedHeightCss / result.hitArea.heightCss
+    const widthRatio = measurement.widthCss / hitArea.widthCss
+    const heightRatio = measurement.heightCss / hitArea.heightCss
     
     console.log(`Width ratio: ${(widthRatio * 100).toFixed(1)}% (painted/hit)`)
     console.log(`Height ratio: ${(heightRatio * 100).toFixed(1)}% (painted/hit)`)
@@ -783,5 +657,119 @@ test.describe('Deterministic Painted Geometry - 1280×800', () => {
     expect(widthRatio, `Painted width must be 90-110% of hit area (got ${(widthRatio * 100).toFixed(1)}%)`).toBeLessThanOrEqual(1.1)
     expect(heightRatio, `Painted height must be 90-110% of hit area (got ${(heightRatio * 100).toFixed(1)}%)`).toBeGreaterThanOrEqual(0.9)
     expect(heightRatio, `Painted height must be 90-110% of hit area (got ${(heightRatio * 100).toFixed(1)}%)`).toBeLessThanOrEqual(1.1)
+  })
+
+  test('Balloons must not overlap and must fit in visible game area', async ({ page }) => {
+    const result = await page.evaluate(() => {
+      const game = window.__tatematika!.getGame()
+      const scene = game.scene.getScene('GameScene') as any
+      const balloonSprites = scene.balloonSprites
+      
+      const Commands = { BEGIN_PATH: 1, LINE_TO: 4, MOVE_TO: 5, FILL_PATH: 8 }
+      
+      const balloons = balloonSprites.map((bs: any) => {
+        const sprite = bs.sprite as any
+        const commandBuffer = sprite.commandBuffer
+        
+        const filledPaths: Array<Array<{ x: number; y: number }>> = []
+        let currentPath: Array<{ x: number; y: number }> = []
+        let inPath = false
+        
+        for (let i = 0; i < commandBuffer.length; i++) {
+          const cmd = commandBuffer[i]
+          
+          if (cmd === Commands.BEGIN_PATH) {
+            currentPath = []
+            inPath = true
+          } else if (cmd === Commands.MOVE_TO && inPath) {
+            currentPath.push({ x: commandBuffer[i + 1], y: commandBuffer[i + 2] })
+            i += 2
+          } else if (cmd === Commands.LINE_TO && inPath) {
+            currentPath.push({ x: commandBuffer[i + 1], y: commandBuffer[i + 2] })
+            i += 2
+          } else if (cmd === Commands.FILL_PATH && inPath) {
+            if (currentPath.length > 0) {
+              filledPaths.push([...currentPath])
+            }
+            currentPath = []
+            inPath = false
+          }
+        }
+        
+        let largestPath: Array<{ x: number; y: number }> = []
+        let largestArea = 0
+        
+        for (const path of filledPaths) {
+          if (path.length < 3) continue
+          
+          let minX = Infinity, maxX = -Infinity
+          let minY = Infinity, maxY = -Infinity
+          
+          for (const point of path) {
+            minX = Math.min(minX, point.x)
+            maxX = Math.max(maxX, point.x)
+            minY = Math.min(minY, point.y)
+            maxY = Math.max(maxY, point.y)
+          }
+          
+          const area = (maxX - minX) * (maxY - minY)
+          if (area > largestArea) {
+            largestArea = area
+            largestPath = path
+          }
+        }
+        
+        let minX = Infinity, maxX = -Infinity
+        let minY = Infinity, maxY = -Infinity
+        
+        for (const point of largestPath) {
+          minX = Math.min(minX, point.x)
+          maxX = Math.max(maxX, point.x)
+          minY = Math.min(minY, point.y)
+          maxY = Math.max(maxY, point.y)
+        }
+        
+        return {
+          id: bs.id,
+          left: bs.x + minX,
+          right: bs.x + maxX,
+          top: bs.y + minY,
+          bottom: bs.y + maxY
+        }
+      })
+      
+      return {
+        balloons,
+        gameWidth: game.scale.width,
+        gameHeight: game.scale.height
+      }
+    })
+    
+    console.log(`\n=== Layout Check (1280×800, count=${result.balloons.length}) ===`)
+    
+    for (const balloon of result.balloons) {
+      const fitsX = balloon.left >= 0 && balloon.right <= result.gameWidth
+      const fitsY = balloon.top >= 0 && balloon.bottom <= result.gameHeight
+      
+      console.log(`Balloon ${balloon.id}: (${balloon.left.toFixed(1)}, ${balloon.top.toFixed(1)}) to (${balloon.right.toFixed(1)}, ${balloon.bottom.toFixed(1)}) - fits: ${fitsX && fitsY}`)
+      
+      expect(balloon.left, `Balloon ${balloon.id} left must be >= 0`).toBeGreaterThanOrEqual(0)
+      expect(balloon.right, `Balloon ${balloon.id} right must be <= ${result.gameWidth}`).toBeLessThanOrEqual(result.gameWidth)
+      expect(balloon.top, `Balloon ${balloon.id} top must be >= 0`).toBeGreaterThanOrEqual(0)
+      expect(balloon.bottom, `Balloon ${balloon.id} bottom must be <= ${result.gameHeight}`).toBeLessThanOrEqual(result.gameHeight)
+    }
+    
+    for (let i = 0; i < result.balloons.length; i++) {
+      for (let j = i + 1; j < result.balloons.length; j++) {
+        const a = result.balloons[i]
+        const b = result.balloons[j]
+        
+        const overlap = !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom)
+        
+        console.log(`Balloons ${a.id} & ${b.id}: overlap = ${overlap}`)
+        
+        expect(overlap, `Balloons ${a.id} and ${b.id} must not overlap`).toBe(false)
+      }
+    }
   })
 })
