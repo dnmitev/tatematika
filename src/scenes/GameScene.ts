@@ -294,35 +294,44 @@ export class GameScene extends Phaser.Scene {
     const maxFormulaHeight = Math.max(...tempTexts.map(t => t.height))
     tempTexts.forEach(t => t.destroy())
     
-    const paddingFactor = 1.5
-    const minBalloonWidth = Math.max(minTarget, maxFormulaWidth * paddingFactor)
-    const minBalloonHeight = Math.max(minTarget, maxFormulaHeight * paddingFactor)
-    
-    let balloonWidth = minBalloonWidth
-    let balloonHeight = minBalloonHeight
+    const targetTextFitRatio = 0.8
+    let balloonWidth = Math.max(minTarget, maxFormulaWidth * 1.5)
+    let balloonHeight = Math.max(minTarget, maxFormulaHeight * 1.5)
     
     if (count >= 4) {
       const maxWidthForTwoCols = (availableWidth - 3 * margin) / 2
+      const rows = count === 4 ? 2 : 3
+      const maxHeight = (availableHeight - (rows + 1) * margin) / rows
+      
       if (balloonWidth > maxWidthForTwoCols) {
         balloonWidth = Math.max(minTarget, maxWidthForTwoCols)
       }
       
-      const rows = count === 4 ? 2 : 3
       const neededHeight = rows * balloonHeight + (rows + 1) * margin
       if (neededHeight > availableHeight) {
-        const maxHeight = (availableHeight - (rows + 1) * margin) / rows
         balloonHeight = Math.max(minTarget, maxHeight)
       }
-    }
-    
-    const ellipseA = balloonWidth / 2
-    const ellipseB = balloonHeight / 2
-    const textFitTest = Math.pow(maxFormulaWidth / (2 * ellipseA), 2) + Math.pow(maxFormulaHeight / (2 * ellipseB), 2)
-    
-    if (textFitTest >= 0.95) {
-      const requiredScale = Math.sqrt(textFitTest / 0.75)
-      balloonWidth = Math.max(minTarget, balloonWidth * requiredScale)
-      balloonHeight = Math.max(minTarget, balloonHeight * requiredScale)
+      
+      let textFitRatio = Math.pow(maxFormulaWidth / balloonWidth, 2) + Math.pow(maxFormulaHeight / balloonHeight, 2)
+      
+      if (textFitRatio > targetTextFitRatio) {
+        if (balloonHeight < maxHeight) {
+          const heightIncrease = Math.min(
+            maxHeight - balloonHeight,
+            balloonHeight * (Math.sqrt(textFitRatio / targetTextFitRatio) - 1)
+          )
+          balloonHeight += heightIncrease
+          textFitRatio = Math.pow(maxFormulaWidth / balloonWidth, 2) + Math.pow(maxFormulaHeight / balloonHeight, 2)
+        }
+        
+        if (textFitRatio > targetTextFitRatio && balloonWidth < maxWidthForTwoCols) {
+          const widthIncrease = Math.min(
+            maxWidthForTwoCols - balloonWidth,
+            balloonWidth * (Math.sqrt(textFitRatio / targetTextFitRatio) - 1)
+          )
+          balloonWidth += widthIncrease
+        }
+      }
     }
     
     let positions: Array<{ x: number; y: number }> = []
@@ -352,22 +361,10 @@ export class GameScene extends Phaser.Scene {
         }))
       }
     } else if (count === 4) {
-      const totalWidth = 2 * balloonWidth + margin
-      if (totalWidth > availableWidth - 2 * margin) {
-        const maxWidthForTwoCols = (availableWidth - 3 * margin) / 2
-        balloonWidth = Math.max(minTarget, maxWidthForTwoCols)
-        const requiredHeight = (maxFormulaHeight * paddingFactor * balloonWidth) / minBalloonWidth
-        balloonHeight = Math.max(minTarget, requiredHeight)
-      }
-      
       const leftMargin = (availableWidth - (2 * balloonWidth + margin)) / 2
       const col1 = leftMargin + balloonWidth / 2
       const col2 = col1 + balloonWidth + margin
       
-      const totalHeight = 2 * balloonHeight + margin
-      if (totalHeight > availableHeight) {
-        balloonHeight = Math.max(minTarget, (availableHeight - margin) / 2)
-      }
       const finalTotalHeight = 2 * balloonHeight + margin
       const topMargin = (availableHeight - finalTotalHeight) / 2
       const y1 = hudTopSpace + topMargin + balloonHeight / 2
@@ -380,13 +377,6 @@ export class GameScene extends Phaser.Scene {
         { x: col2, y: y2 }
       ]
     } else {
-      const totalWidth = 2 * balloonWidth + margin
-      if (totalWidth > availableWidth - 2 * margin) {
-        const maxWidthForTwoCols = (availableWidth - 3 * margin) / 2
-        balloonWidth = Math.max(minTarget, maxWidthForTwoCols)
-        const requiredHeight = (maxFormulaHeight * paddingFactor * balloonWidth) / minBalloonWidth
-        balloonHeight = Math.max(minTarget, requiredHeight)
-      }
       
       const leftMargin = (availableWidth - (2 * balloonWidth + margin)) / 2
       const col1 = leftMargin + balloonWidth / 2
