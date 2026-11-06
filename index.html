@@ -15,12 +15,26 @@
       width: 100vw;
       height: 100vh;
       display: flex;
+      flex-direction: column;
       justify-content: center;
       align-items: center;
+    }
+    .game-title {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 24px;
+      color: #FF1493;
+      font-weight: bold;
+      z-index: 1000;
+      pointer-events: none;
+      opacity: 0.8;
     }
   </style>
 </head>
 <body>
+  <div class="game-title">Котето и балоните</div>
   <div id="game-container"></div>
   <script type="module" src="/src/main.ts"></script>
 </body>

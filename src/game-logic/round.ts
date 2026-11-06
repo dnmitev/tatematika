@@ -1,17 +1,38 @@
 import type { RoundState, Balloon, GameSettings } from './types'
+import { generateTarget, generateRoundFormulas } from './formula-generator'
 
 /**
  * Create a new round with balloons
  */
 export function createRound(settings: GameSettings): RoundState {
-  throw new Error('not implemented')
+  const target = generateTarget(settings.upperLimit)
+  const formulas = generateRoundFormulas(
+    target,
+    settings.balloonCount,
+    settings.upperLimit,
+    settings.operations
+  )
+
+  const balloons: Balloon[] = formulas.map((formula, index) => ({
+    id: `balloon-${Date.now()}-${index}-${Math.random()}`,
+    formula,
+    isCorrect: formula.result === target
+  }))
+
+  return {
+    target,
+    balloons,
+    wrongAttempts: 0,
+    hintsEnabled: false
+  }
 }
 
 /**
  * Check if a balloon is correct for the current target
  */
 export function checkBalloon(round: RoundState, balloonId: string): boolean {
-  throw new Error('not implemented')
+  const balloon = round.balloons.find(b => b.id === balloonId)
+  return balloon?.isCorrect ?? false
 }
 
 /**
@@ -19,7 +40,7 @@ export function checkBalloon(round: RoundState, balloonId: string): boolean {
  * Returns updated round state (should start a new round)
  */
 export function handleCorrectPop(round: RoundState, settings: GameSettings): RoundState {
-  throw new Error('not implemented')
+  return createRound(settings)
 }
 
 /**
@@ -27,19 +48,26 @@ export function handleCorrectPop(round: RoundState, settings: GameSettings): Rou
  * Returns updated round state with incremented wrong attempts
  */
 export function handleWrongAttempt(round: RoundState): RoundState {
-  throw new Error('not implemented')
+  const newWrongAttempts = round.wrongAttempts + 1
+  return {
+    ...round,
+    wrongAttempts: newWrongAttempts,
+    hintsEnabled: newWrongAttempts >= 2
+  }
 }
 
 /**
  * Check if hints should be shown (after 2 wrong attempts)
  */
 export function shouldShowHint(round: RoundState): boolean {
-  throw new Error('not implemented')
+  return round.hintsEnabled
 }
 
 /**
  * Reset balloons to top (when they reach bottom)
  */
 export function resetBalloons(round: RoundState): RoundState {
-  throw new Error('not implemented')
+  return {
+    ...round
+  }
 }

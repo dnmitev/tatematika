@@ -1,5 +1,7 @@
 import Phaser from 'phaser'
 import { loadSettings } from './game-logic/settings'
+import { GameScene } from './scenes/GameScene'
+import { LevelCompleteScene } from './scenes/LevelCompleteScene'
 
 /**
  * Test hook API for Playwright e2e tests
@@ -31,48 +33,74 @@ declare global {
   }
 }
 
-// Minimal Phaser config to boot the game
+// Phaser config
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   width: 800,
   height: 600,
   parent: 'game-container',
-  scene: {
-    create() {
-      // Stub scene - will be implemented by developer
-      this.add.text(400, 300, 'Котето и балоните', {
-        fontSize: '32px',
-        color: '#000000'
-      }).setOrigin(0.5)
-    }
-  }
+  scene: [GameScene, LevelCompleteScene],
+  backgroundColor: '#87CEEB'
 }
 
 // Initialize the game
 const game = new Phaser.Game(config)
 
 // Load settings on startup
-const settings = loadSettings()
+loadSettings()
 
-// Stub test hook implementation
+// Get active game scene
+function getGameScene(): GameScene | null {
+  const scene = game.scene.getScene('GameScene')
+  return scene && scene.scene.isActive() ? (scene as GameScene) : null
+}
+
+function getLevelCompleteScene(): any {
+  return game.scene.getScene('LevelCompleteScene')
+}
+
+// Test hook implementation
 window.__tatematika = {
   getGameState() {
-    throw new Error('not implemented')
+    const gameScene = getGameScene()
+    if (!gameScene) {
+      throw new Error('GameScene not active')
+    }
+    return gameScene.getGameState()
   },
   clickBalloon(balloonId: string) {
-    throw new Error('not implemented')
+    const gameScene = getGameScene()
+    if (!gameScene) {
+      throw new Error('GameScene not active')
+    }
+    gameScene.clickBalloon(balloonId)
   },
   pressKey(key: 'left' | 'right' | 'space' | 'up') {
-    throw new Error('not implemented')
+    const gameScene = getGameScene()
+    if (!gameScene) {
+      throw new Error('GameScene not active')
+    }
+    gameScene.pressKey(key)
   },
   toggleMute() {
-    throw new Error('not implemented')
+    const gameScene = getGameScene()
+    if (gameScene) {
+      gameScene.toggleMutePublic()
+    }
   },
   isMuted() {
-    throw new Error('not implemented')
+    const gameScene = getGameScene()
+    if (!gameScene) {
+      return false
+    }
+    return gameScene.isMutedPublic()
   },
   getLevelEndText() {
-    throw new Error('not implemented')
+    const gameScene = getGameScene()
+    if (gameScene) {
+      return gameScene.getLevelEndText()
+    }
+    return null
   }
 }
 

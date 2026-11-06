@@ -33,5 +33,5 @@ export const BUTTON_TO_MENU = 'Към менюто'
  * Get a rotating praise message
  */
 export function getPraiseMessage(index: number): string {
-  throw new Error('not implemented')
+  return PRAISE_MESSAGES[index % PRAISE_MESSAGES.length]
 }
