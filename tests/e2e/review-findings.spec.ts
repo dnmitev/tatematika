@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { popCorrectBalloonAndWait } from './helpers'
+import { popCorrectBalloonAndWait, getGameScaleAndRect } from './helpers'
 
 /**
  * Regression tests for review findings on commit cfaa677
@@ -94,28 +94,22 @@ test.describe('Review Findings - Regression Tests', () => {
     const restingY = initialJumpState.restingY
     
     // Get balloon position in CSS pixels for clicking
-    const balloonCssBounds = await page.evaluate((id) => {
-      const bounds = window.__tatematika!.getBalloonBounds(id)
-      if (!bounds) return null
-      
-      const canvas = document.querySelector('canvas')!
-      const rect = canvas.getBoundingClientRect()
-      const scale = rect.width / 800
-      
-      return {
-        x: bounds.x * scale + rect.left,
-        y: bounds.y * scale + rect.top,
-        width: bounds.width * scale,
-        height: bounds.height * scale
-      }
-    }, targetBalloon.id)
+    const { canvasRect, scale } = await getGameScaleAndRect(page)
+    const balloonGameBounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), targetBalloon.id)
     
-    expect(balloonCssBounds).not.toBeNull()
+    expect(balloonGameBounds).not.toBeNull()
+    
+    const balloonCssBounds = {
+      x: balloonGameBounds!.x * scale + canvasRect.left,
+      y: balloonGameBounds!.y * scale + canvasRect.top,
+      width: balloonGameBounds!.width * scale,
+      height: balloonGameBounds!.height * scale
+    }
     
     // Click balloon center using real mouse click
     await page.mouse.click(
-      balloonCssBounds!.x + balloonCssBounds!.width / 2, 
-      balloonCssBounds!.y + balloonCssBounds!.height / 2
+      balloonCssBounds.x + balloonCssBounds.width / 2, 
+      balloonCssBounds.y + balloonCssBounds.height / 2
     )
     
     // Sample cat position and jump state over time to verify sequence: arrive, then jump
@@ -236,28 +230,22 @@ test.describe('Review Findings - Touch Input', () => {
     const initialJumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
     const restingY = initialJumpState.restingY
     
-    const balloonCssBounds = await page.evaluate((id) => {
-      const bounds = window.__tatematika!.getBalloonBounds(id)
-      if (!bounds) return null
-      
-      const canvas = document.querySelector('canvas')!
-      const rect = canvas.getBoundingClientRect()
-      const scale = rect.width / 800
-      
-      return {
-        x: bounds.x * scale + rect.left,
-        y: bounds.y * scale + rect.top,
-        width: bounds.width * scale,
-        height: bounds.height * scale
-      }
-    }, targetBalloon.id)
+    const { canvasRect, scale } = await getGameScaleAndRect(page)
+    const balloonGameBounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), targetBalloon.id)
     
-    expect(balloonCssBounds).not.toBeNull()
+    expect(balloonGameBounds).not.toBeNull()
+    
+    const balloonCssBounds = {
+      x: balloonGameBounds!.x * scale + canvasRect.left,
+      y: balloonGameBounds!.y * scale + canvasRect.top,
+      width: balloonGameBounds!.width * scale,
+      height: balloonGameBounds!.height * scale
+    }
     
     // Tap balloon center using touchscreen
     await page.touchscreen.tap(
-      balloonCssBounds!.x + balloonCssBounds!.width / 2, 
-      balloonCssBounds!.y + balloonCssBounds!.height / 2
+      balloonCssBounds.x + balloonCssBounds.width / 2, 
+      balloonCssBounds.y + balloonCssBounds.height / 2
     )
     
     // Sample cat position and jump state over time to verify sequence: arrive, then jump
