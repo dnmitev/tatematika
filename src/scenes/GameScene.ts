@@ -281,7 +281,6 @@ export class GameScene extends Phaser.Scene {
     const margin = Math.max(15, this.scale.width * 0.04)
     
     const minTarget = 64
-    const padding = 20
     
     const tempTexts = this.gameState.round.balloons.map(balloon => 
       this.add.text(0, 0, balloon.formula.display, {
@@ -292,24 +291,38 @@ export class GameScene extends Phaser.Scene {
     )
     
     const maxFormulaWidth = Math.max(...tempTexts.map(t => t.width))
+    const maxFormulaHeight = Math.max(...tempTexts.map(t => t.height))
     tempTexts.forEach(t => t.destroy())
     
-    const minBalloonWidth = Math.max(minTarget, maxFormulaWidth + padding * 2)
+    const paddingFactor = 1.5
+    const minBalloonWidth = Math.max(minTarget, maxFormulaWidth * paddingFactor)
+    const minBalloonHeight = Math.max(minTarget, maxFormulaHeight * paddingFactor)
+    
     let balloonWidth = minBalloonWidth
-    let balloonHeight = Math.max(minTarget, balloonWidth * 0.75)
+    let balloonHeight = minBalloonHeight
     
     if (count >= 4) {
       const maxWidthForTwoCols = (availableWidth - 3 * margin) / 2
       if (balloonWidth > maxWidthForTwoCols) {
         balloonWidth = Math.max(minTarget, maxWidthForTwoCols)
-        balloonHeight = Math.max(minTarget, balloonWidth * 0.75)
       }
       
-      const neededHeight = count === 4 ? 2 * balloonHeight + 3 * margin : 3 * balloonHeight + 4 * margin
+      const rows = count === 4 ? 2 : 3
+      const neededHeight = rows * balloonHeight + (rows + 1) * margin
       if (neededHeight > availableHeight) {
-        const maxHeight = count === 4 ? (availableHeight - 3 * margin) / 2 : (availableHeight - 4 * margin) / 3
+        const maxHeight = (availableHeight - (rows + 1) * margin) / rows
         balloonHeight = Math.max(minTarget, maxHeight)
       }
+    }
+    
+    const ellipseA = balloonWidth / 2
+    const ellipseB = balloonHeight / 2
+    const textFitTest = Math.pow(maxFormulaWidth / (2 * ellipseA), 2) + Math.pow(maxFormulaHeight / (2 * ellipseB), 2)
+    
+    if (textFitTest >= 0.95) {
+      const requiredScale = Math.sqrt(textFitTest / 0.75)
+      balloonWidth = Math.max(minTarget, balloonWidth * requiredScale)
+      balloonHeight = Math.max(minTarget, balloonHeight * requiredScale)
     }
     
     let positions: Array<{ x: number; y: number }> = []
@@ -328,7 +341,11 @@ export class GameScene extends Phaser.Scene {
       } else {
         const x = availableWidth / 2
         const totalHeight = count * balloonHeight + (count - 1) * margin
-        const topMargin = (availableHeight - totalHeight) / 2
+        if (totalHeight > availableHeight) {
+          balloonHeight = Math.max(minTarget, (availableHeight - (count - 1) * margin) / count)
+        }
+        const finalTotalHeight = count * balloonHeight + (count - 1) * margin
+        const topMargin = (availableHeight - finalTotalHeight) / 2
         positions = Array.from({ length: count }, (_, i) => ({
           x,
           y: hudTopSpace + topMargin + i * (balloonHeight + margin) + balloonHeight / 2
@@ -336,12 +353,23 @@ export class GameScene extends Phaser.Scene {
       }
     } else if (count === 4) {
       const totalWidth = 2 * balloonWidth + margin
-      const leftMargin = (availableWidth - totalWidth) / 2
+      if (totalWidth > availableWidth - 2 * margin) {
+        const maxWidthForTwoCols = (availableWidth - 3 * margin) / 2
+        balloonWidth = Math.max(minTarget, maxWidthForTwoCols)
+        const requiredHeight = (maxFormulaHeight * paddingFactor * balloonWidth) / minBalloonWidth
+        balloonHeight = Math.max(minTarget, requiredHeight)
+      }
+      
+      const leftMargin = (availableWidth - (2 * balloonWidth + margin)) / 2
       const col1 = leftMargin + balloonWidth / 2
       const col2 = col1 + balloonWidth + margin
       
       const totalHeight = 2 * balloonHeight + margin
-      const topMargin = (availableHeight - totalHeight) / 2
+      if (totalHeight > availableHeight) {
+        balloonHeight = Math.max(minTarget, (availableHeight - margin) / 2)
+      }
+      const finalTotalHeight = 2 * balloonHeight + margin
+      const topMargin = (availableHeight - finalTotalHeight) / 2
       const y1 = hudTopSpace + topMargin + balloonHeight / 2
       const y2 = y1 + balloonHeight + margin
       
@@ -353,13 +381,24 @@ export class GameScene extends Phaser.Scene {
       ]
     } else {
       const totalWidth = 2 * balloonWidth + margin
-      const leftMargin = (availableWidth - totalWidth) / 2
+      if (totalWidth > availableWidth - 2 * margin) {
+        const maxWidthForTwoCols = (availableWidth - 3 * margin) / 2
+        balloonWidth = Math.max(minTarget, maxWidthForTwoCols)
+        const requiredHeight = (maxFormulaHeight * paddingFactor * balloonWidth) / minBalloonWidth
+        balloonHeight = Math.max(minTarget, requiredHeight)
+      }
+      
+      const leftMargin = (availableWidth - (2 * balloonWidth + margin)) / 2
       const col1 = leftMargin + balloonWidth / 2
       const col2 = col1 + balloonWidth + margin
       const colCenter = availableWidth / 2
       
       const totalHeight = 3 * balloonHeight + 2 * margin
-      const topMargin = (availableHeight - totalHeight) / 2
+      if (totalHeight > availableHeight) {
+        balloonHeight = Math.max(minTarget, (availableHeight - 2 * margin) / 3)
+      }
+      const finalTotalHeight = 3 * balloonHeight + 2 * margin
+      const topMargin = (availableHeight - finalTotalHeight) / 2
       const y1 = hudTopSpace + topMargin + balloonHeight / 2
       const y2 = y1 + balloonHeight + margin
       const y3 = y2 + balloonHeight + margin
@@ -700,8 +739,9 @@ export class GameScene extends Phaser.Scene {
         }
 
         const catTopY = this.catJumpStartY - 40
-        const resetMargin = 30
-        if (bs.y > catTopY - resetMargin) {
+        const balloonRadius = bs.sprite.input ? (bs.sprite.input.hitArea as Phaser.Geom.Ellipse).height / 2 : 50
+        const resetMargin = 20
+        if (bs.y + balloonRadius > catTopY - resetMargin) {
           this.gameState.round = resetBalloons(this.gameState.round)
           this.createBalloons()
         }
