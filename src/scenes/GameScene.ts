@@ -296,14 +296,12 @@ export class GameScene extends Phaser.Scene {
     })
   }
 
-  private drawBalloon(graphics: Phaser.GameObjects.Graphics, x: number, y: number, isCorrect: boolean, radius: number = 80) {
+  private drawBalloon(graphics: Phaser.GameObjects.Graphics, x: number, y: number, isCorrect: boolean, radius: number = 100) {
     const colors = [0xFF6B6B, 0xFFD93D, 0x6BCB77, 0x4D96FF, 0xA78BFA]
     const color = colors[Math.floor(Math.random() * colors.length)]
     
-    const radiusX = radius * 1.5
-    const radiusY = radius
-    const width = radiusX * 2
-    const height = radiusY * 2
+    const width = radius * 1.5 * 2
+    const height = radius * 2
     
     graphics.fillStyle(color, 0.9)
     graphics.fillEllipse(x, y, width, height)
@@ -311,12 +309,12 @@ export class GameScene extends Phaser.Scene {
     graphics.strokeEllipse(x, y, width, height)
     
     graphics.fillStyle(0xFFFFFF, 0.3)
-    graphics.fillEllipse(x - radiusX/2, y - radiusY/2, radiusX, radiusY)
+    graphics.fillEllipse(x - width/4, y - height/4, width/2, height/2)
     
     graphics.lineStyle(2, 0x000000, 0.5)
     graphics.beginPath()
-    graphics.moveTo(x, y + radiusY)
-    graphics.lineTo(x, y + radiusY + 20)
+    graphics.moveTo(x, y + height/2)
+    graphics.lineTo(x, y + height/2 + 20)
     graphics.strokePath()
   }
 
