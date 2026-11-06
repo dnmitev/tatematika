@@ -746,8 +746,8 @@ export class GameScene extends Phaser.Scene {
         const catEarsHeight = 40
         const catTopDuringJump = this.catJumpStartY - catEarsHeight - jumpHeight
         const balloonRadius = bs.sprite.input ? (bs.sprite.input.hitArea as Phaser.Geom.Ellipse).height / 2 : 50
-        const resetMargin = 150
-        if (bs.y + balloonRadius > catTopDuringJump - resetMargin) {
+        const verticalBuffer = 300
+        if (bs.y + balloonRadius > catTopDuringJump - verticalBuffer) {
           this.gameState.round = resetBalloons(this.gameState.round)
           this.createBalloons()
           return
