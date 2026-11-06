@@ -263,32 +263,71 @@ async function getCatPaintedBounds(page: any): Promise<AABB> {
     const scene = game.scene.getScene('GameScene') as any
     const catGraphics = scene.cat
     
-    const Commands = { BEGIN_PATH: 1, LINE_TO: 4, MOVE_TO: 5, FILL_PATH: 8, FILL_ELLIPSE: 10, FILL_TRIANGLE: 11, FILL_CIRCLE: 12 }
+    // Phaser Graphics Commands
+    const Commands = {
+      ARC: 0,
+      BEGIN_PATH: 1,
+      CLOSE_PATH: 2,
+      FILL_RECT: 3,
+      LINE_TO: 4,
+      MOVE_TO: 5,
+      LINE_STYLE: 6,
+      FILL_STYLE: 7,
+      FILL_PATH: 8,
+      STROKE_PATH: 9,
+      FILL_TRIANGLE: 10
+    }
     
     const commandBuffer = catGraphics.commandBuffer
     
-    // Collect all points from all filled paths
+    // Collect all points from all drawing commands
     const allPoints: Array<{ x: number; y: number }> = []
     let currentPath: Array<{ x: number; y: number }> = []
-    let inPath = false
     
-    for (let i = 0; i < commandBuffer.length; i++) {
+    let i = 0
+    while (i < commandBuffer.length) {
       const cmd = commandBuffer[i]
+      i++
       
-      if (cmd === Commands.BEGIN_PATH) {
-        currentPath = []
-        inPath = true
-      } else if (cmd === Commands.MOVE_TO && inPath) {
-        currentPath.push({ x: commandBuffer[i + 1], y: commandBuffer[i + 2] })
+      if (cmd === Commands.MOVE_TO) {
+        currentPath.push({ x: commandBuffer[i], y: commandBuffer[i + 1] })
         i += 2
-      } else if (cmd === Commands.LINE_TO && inPath) {
-        currentPath.push({ x: commandBuffer[i + 1], y: commandBuffer[i + 2] })
+      } else if (cmd === Commands.LINE_TO) {
+        currentPath.push({ x: commandBuffer[i], y: commandBuffer[i + 1] })
         i += 2
-      } else if (cmd === Commands.FILL_PATH && inPath) {
+      } else if (cmd === Commands.FILL_PATH) {
+        // Path complete, add to all points
         allPoints.push(...currentPath)
         currentPath = []
-        inPath = false
+      } else if (cmd === Commands.STROKE_PATH) {
+        // Stroked paths aren't filled, don't count them
+        currentPath = []
+      } else if (cmd === Commands.FILL_TRIANGLE) {
+        // FILL_TRIANGLE: x1, y1, x2, y2, x3, y3
+        allPoints.push({ x: commandBuffer[i], y: commandBuffer[i + 1] })
+        allPoints.push({ x: commandBuffer[i + 2], y: commandBuffer[i + 3] })
+        allPoints.push({ x: commandBuffer[i + 4], y: commandBuffer[i + 5] })
+        i += 6
+      } else if (cmd === Commands.BEGIN_PATH) {
+        // Start fresh path
+        currentPath = []
+      } else if (cmd === Commands.CLOSE_PATH) {
+        // Path closed but not necessarily filled yet
+      } else if (cmd === Commands.FILL_STYLE) {
+        // Skip color and alpha
+        i += 2
+      } else if (cmd === Commands.LINE_STYLE) {
+        // Skip width, color, alpha
+        i += 3
+      } else if (cmd === Commands.ARC) {
+        // Skip x, y, radius, startAngle, endAngle, anticlockwise
+        i += 6
       }
+    }
+    
+    // Add any remaining path
+    if (currentPath.length > 0) {
+      allPoints.push(...currentPath)
     }
     
     // Compute bounding box of all painted points
@@ -300,10 +339,12 @@ async function getCatPaintedBounds(page: any): Promise<AABB> {
     let minY = Infinity, maxY = -Infinity
     
     for (const point of allPoints) {
-      minX = Math.min(minX, point.x)
-      maxX = Math.max(maxX, point.x)
-      minY = Math.min(minY, point.y)
-      maxY = Math.max(maxY, point.y)
+      if (typeof point.x === 'number' && typeof point.y === 'number') {
+        minX = Math.min(minX, point.x)
+        maxX = Math.max(maxX, point.x)
+        minY = Math.min(minY, point.y)
+        maxY = Math.max(maxY, point.y)
+      }
     }
     
     return {
