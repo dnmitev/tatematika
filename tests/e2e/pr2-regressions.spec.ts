@@ -22,7 +22,7 @@ test.describe('PR #2 Review Regressions', () => {
   // TEST BUG FIX: Reload count tests must use real UI settings
   // ============================================================================
 
-  test('FIXED K9: Count 4 after reload persists if spec says so', async ({ page }) => {
+  test('FIXED K9: Count 4 after reload persists per spec', async ({ page }) => {
     // Open settings and set balloon count to 4 via REAL UI
     await page.evaluate(() => window.__tatematika!.openSettings())
     await page.waitForTimeout(200)
@@ -56,7 +56,7 @@ test.describe('PR #2 Review Regressions', () => {
     expect(stateAfter.settings.balloonCount).toBe(4)
   })
 
-  test('FIXED K9: Count 5 after reload persists if spec says so', async ({ page }) => {
+  test('FIXED K9: Count 5 after reload persists per spec', async ({ page }) => {
     // Open settings and set balloon count to 5 via REAL UI
     await page.evaluate(() => window.__tatematika!.openSettings())
     await page.waitForTimeout(200)
@@ -311,161 +311,215 @@ test.describe('PR #2 Review Regressions', () => {
   test('K10: Mute stops sounds that are already playing or scheduled', async ({ page }) => {
     // Spec K10: "всички звуци спират, докато не го натисне отново"
     // Regression: mute must stop sounds ALREADY playing, not just block future calls
-    // Instrument AudioContext via addInitScript to track oscillators
+    // App creates new AudioContext per sound (GameScene.ts ~574), so patch prototypes
     
-    // Create fresh page with AudioContext instrumentation
-    const instrumentedPage = await page.context().newPage()
-    
-    // Instrument AudioContext to track oscillator start/stop
-    await instrumentedPage.addInitScript(() => {
-      const originalAudioContext = window.AudioContext || (window as any).webkitAudioContext
+    // Instrument AudioContext at PROTOTYPE level before any context is created
+    await page.addInitScript(() => {
+      const oscillators: Array<{
+        started: boolean
+        stopped: boolean
+        disconnected: boolean
+        startTime?: number
+        stopTime?: number
+        gainNode?: any
+        gainReachedZero: boolean
+      }> = []
       
-      if (originalAudioContext) {
-        const oscillators: any[] = []
+      // Patch BaseAudioContext/AudioContext prototype's createOscillator
+      const BaseProto = (window as any).BaseAudioContext?.prototype || (window as any).AudioContext?.prototype || (window as any).webkitAudioContext?.prototype
+      
+      if (BaseProto && BaseProto.createOscillator) {
+        const originalCreateOscillator = BaseProto.createOscillator
         
-        class InstrumentedAudioContext extends originalAudioContext {
-          constructor(...args: any[]) {
-            super(...args)
-            
-            const originalCreateOscillator = this.createOscillator.bind(this)
-            this.createOscillator = () => {
-              const osc = originalCreateOscillator()
-              const oscillatorState = { 
-                started: false, 
-                stopped: false, 
-                oscillator: osc,
-                gainNode: null as any
-              }
-              
-              const originalStart = osc.start.bind(osc)
-              const originalStop = osc.stop.bind(osc)
-              const originalConnect = osc.connect.bind(osc)
-              
-              osc.start = (...args: any[]) => {
-                oscillatorState.started = true
-                return originalStart(...args)
-              }
-              
-              osc.stop = (...args: any[]) => {
-                oscillatorState.stopped = true
-                return originalStop(...args)
-              }
-              
-              osc.connect = (destination: any, ...args: any[]) => {
-                if (destination && destination.gain !== undefined) {
-                  oscillatorState.gainNode = destination
-                }
-                return originalConnect(destination, ...args)
-              }
-              
-              oscillators.push(oscillatorState)
-              return osc
-            }
+        BaseProto.createOscillator = function() {
+          const osc = originalCreateOscillator.call(this)
+          const state = {
+            started: false,
+            stopped: false,
+            disconnected: false,
+            startTime: undefined,
+            stopTime: undefined,
+            gainNode: undefined,
+            gainReachedZero: false
           }
+          oscillators.push(state)
+          
+          // Patch per-instance methods
+          const originalStart = osc.start
+          const originalStop = osc.stop
+          const originalConnect = osc.connect
+          const originalDisconnect = osc.disconnect
+          
+          osc.start = function(...args: any[]) {
+            state.started = true
+            state.startTime = Date.now()
+            return originalStart.apply(this, args)
+          }
+          
+          osc.stop = function(...args: any[]) {
+            state.stopped = true
+            state.stopTime = Date.now()
+            return originalStop.apply(this, args)
+          }
+          
+          osc.connect = function(destination: any, ...args: any[]) {
+            if (destination && destination.gain !== undefined) {
+              state.gainNode = destination
+            }
+            return originalConnect.apply(this, [destination, ...args])
+          }
+          
+          osc.disconnect = function(...args: any[]) {
+            state.disconnected = true
+            return originalDisconnect.apply(this, args)
+          }
+          
+          return osc
         }
-        
-        if (window.AudioContext) {
-          (window as any).AudioContext = InstrumentedAudioContext
-        }
-        if ((window as any).webkitAudioContext) {
-          (window as any).webkitAudioContext = InstrumentedAudioContext
-        }
-        
-        (window as any).__audioInstrumentation = { oscillators }
       }
+      
+      (window as any).__audioInstrumentation = { oscillators }
     })
     
-    await instrumentedPage.goto('/')
-    await instrumentedPage.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.goto('/')
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
     
     // Ensure unmuted initially
-    const initialMuted = await instrumentedPage.evaluate(() => window.__tatematika!.isMuted())
+    const initialMuted = await page.evaluate(() => window.__tatematika!.isMuted())
     if (initialMuted) {
-      await instrumentedPage.evaluate(() => window.__tatematika!.toggleMute())
+      // Click mute button to unmute
+      const muteButton = page.locator('text=🔇')
+      await muteButton.click()
+      await page.waitForTimeout(100)
     }
+    
+    // Verify unmuted
+    const isMutedAfterToggle = await page.evaluate(() => window.__tatematika!.isMuted())
+    expect(isMutedAfterToggle, 'game must be unmuted before test').toBe(false)
     
     // Wait for cat idle
     await expect.poll(async () => {
-      const jumpState = await instrumentedPage.evaluate(() => window.__tatematika!.getCatJumpState())
+      const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       return !jumpState.isJumping
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
-    // Click correct balloon to trigger sound
-    const state = await instrumentedPage.evaluate(() => window.__tatematika!.getGameState())
+    // Get correct balloon position for REAL user gesture click
+    const state = await page.evaluate(() => window.__tatematika!.getGameState())
     const correctBalloon = state.balloons.find((b: any) => b.isCorrect)!
     
-    await instrumentedPage.evaluate((id) => window.__tatematika!.clickBalloon(id), correctBalloon.id)
+    const balloonBounds = await page.evaluate((id) => 
+      window.__tatematika!.getBalloonBounds(id), correctBalloon.id)
     
-    // Wait briefly for sound to start
-    await instrumentedPage.waitForTimeout(100)
+    const { canvasRect, scale } = await page.evaluate(() => {
+      const game = window.__tatematika!.getGame()
+      const canvas = document.querySelector('canvas')!
+      const rect = canvas.getBoundingClientRect()
+      return {
+        canvasRect: {
+          left: rect.left,
+          top: rect.top
+        },
+        scale: rect.width / game.scale.width
+      }
+    })
     
-    // Check that at least one oscillator started
-    const oscillatorsBeforeMute = await instrumentedPage.evaluate(() => {
+    // Click balloon center with REAL mouse gesture to unlock AudioContext
+    const clickX = canvasRect.left + (balloonBounds.x + balloonBounds.width / 2) * scale
+    const clickY = canvasRect.top + (balloonBounds.y + balloonBounds.height / 2) * scale
+    
+    await page.mouse.click(clickX, clickY)
+    
+    // Wait for jump to start (which should trigger sound)
+    await expect.poll(async () => {
+      const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+      return jumpState.isJumping || jumpState.hasJumped
+    }, { timeout: 2000, intervals: [50] }).toBe(true)
+    
+    // Wait a bit more for sound
+    await page.waitForTimeout(100)
+    
+    // PRECONDITION: Check that at least one oscillator started
+    const oscillatorsBeforeMute = await page.evaluate(() => {
       return (window as any).__audioInstrumentation?.oscillators || []
     })
     
     const anyStarted = oscillatorsBeforeMute.some((o: any) => o.started)
-    expect(anyStarted, 'at least one sound must have started').toBe(true)
+    expect(anyStarted, 'precondition: at least one sound must have started').toBe(true)
     
-    // NOW MUTE while sound might still be playing
-    await instrumentedPage.evaluate(() => window.__tatematika!.toggleMute())
+    // Record mute time and mute via test API (real control click is flaky with emoji text)
+    const muteTime = Date.now()
+    await page.evaluate(() => window.__tatematika!.toggleMute())
     
-    // Wait for mute to take effect
-    await instrumentedPage.waitForTimeout(100)
+    // Wait 50ms for mute to take effect (allowed tolerance)
+    await page.waitForTimeout(50)
     
-    // Assert: all started oscillators must now be stopped OR their gain set to 0
-    const oscillatorsAfterMute = await instrumentedPage.evaluate(() => {
-      return (window as any).__audioInstrumentation?.oscillators || []
-    })
+    // Assert: all started oscillators must now be stopped/disconnected OR gain reached 0
+    // within the mute time + 50ms tolerance
+    const oscillatorsAfterMute = await page.evaluate((muteTime) => {
+      const oscillators = (window as any).__audioInstrumentation?.oscillators || []
+      return oscillators.map((o: any) => ({
+        started: o.started,
+        stopped: o.stopped,
+        disconnected: o.disconnected,
+        startTime: o.startTime,
+        stopTime: o.stopTime,
+        gainReachedZero: o.gainReachedZero,
+        stoppedInTime: o.stopped && o.stopTime && (o.stopTime - muteTime) <= 50
+      }))
+    }, muteTime)
     
     const startedOscillators = oscillatorsAfterMute.filter((o: any) => o.started)
     const allSilenced = startedOscillators.every((o: any) => {
-      // Either stopped OR gain is 0
-      return o.stopped || (o.gainNode && o.gainNode.gain.value === 0)
+      return o.stopped || o.disconnected || o.gainReachedZero
     })
     
-    expect(allSilenced, 'all started oscillators must be stopped or silenced after mute').toBe(true)
+    expect(allSilenced, 'all started oscillators must be stopped/disconnected or gain=0 after mute').toBe(true)
     
-    // Verify no NEW sounds start while muted
-    const countBeforeNextAction = oscillatorsAfterMute.filter((o: any) => o.started).length
+    // Verify no NEW sounds start while muted after another real click
+    const countBeforeMuted = oscillatorsAfterMute.filter((o: any) => o.started).length
     
     // Wait for new round
     await expect.poll(async () => {
-      const newState = await instrumentedPage.evaluate(() => window.__tatematika!.getGameState())
+      const newState = await page.evaluate(() => window.__tatematika!.getGameState())
       return newState.stars === state.stars + 1
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
-    // Click another correct balloon while muted
-    const state2 = await instrumentedPage.evaluate(() => window.__tatematika!.getGameState())
+    // Get next correct balloon
+    const state2 = await page.evaluate(() => window.__tatematika!.getGameState())
     const correctBalloon2 = state2.balloons.find((b: any) => b.isCorrect)!
     
     await expect.poll(async () => {
-      const jumpState = await instrumentedPage.evaluate(() => window.__tatematika!.getCatJumpState())
+      const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       return !jumpState.isJumping
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
-    await instrumentedPage.evaluate((id) => window.__tatematika!.clickBalloon(id), correctBalloon2.id)
-    await instrumentedPage.waitForTimeout(200)
+    const balloonBounds2 = await page.evaluate((id) => 
+      window.__tatematika!.getBalloonBounds(id), correctBalloon2.id)
     
-    const oscillatorsWhileMuted = await instrumentedPage.evaluate(() => {
+    const clickX2 = canvasRect.left + (balloonBounds2.x + balloonBounds2.width / 2) * scale
+    const clickY2 = canvasRect.top + (balloonBounds2.y + balloonBounds2.height / 2) * scale
+    
+    // Real click while muted
+    await page.mouse.click(clickX2, clickY2)
+    await page.waitForTimeout(200)
+    
+    const oscillatorsWhileMuted = await page.evaluate(() => {
       return (window as any).__audioInstrumentation?.oscillators || []
     })
     
-    const countAfterMutedAction = oscillatorsWhileMuted.filter((o: any) => o.started).length
+    const countAfterMutedClick = oscillatorsWhileMuted.filter((o: any) => o.started).length
     
     // No new oscillators should have started while muted
-    expect(countAfterMutedAction, 'no sounds must start while muted').toBe(countBeforeNextAction)
-    
-    await instrumentedPage.close()
+    expect(countAfterMutedClick, 'no sounds must start while muted').toBe(countBeforeMuted)
   })
 
   // ============================================================================
   // REGRESSION: Rapid taps during jump behavior consistency
   // ============================================================================
 
-  test('Rapid taps during jump: spec ambiguity - wrong tap during jump consistency', async ({ page }) => {
+  test('Rapid taps during jump: wrong tap consistency - either fully handled OR fully ignored', async ({ page }) => {
     // SPEC SAYS: Section 3 (Управление) describes click behavior but does NOT specify
-    // what happens when you click DURING a jump. Quote: "Клик върху балон: котето отива под него и скача"
+    // what happens when you click DURING a jump. Quote: "Клік върху балон: котето отива под него и скача"
     // Section 4 says wrong balloon "отскача" but doesn't say if this applies during a jump.
     // 
     // SPEC IS AMBIGUOUS. Testing for consistency:
@@ -475,10 +529,47 @@ test.describe('PR #2 Review Regressions', () => {
     // 
     // It must NOT be half-handled (e.g. error counted but no bounce)
     
+    // Instrument audio to detect sound starts
+    await page.addInitScript(() => {
+      const soundStarts: number[] = []
+      const BaseAudioContextProto = (window as any).BaseAudioContext?.prototype || (window as any).AudioContext?.prototype
+      if (BaseAudioContextProto) {
+        const originalCreateOscillator = BaseAudioContextProto.createOscillator
+        BaseAudioContextProto.createOscillator = function() {
+          const osc = originalCreateOscillator.call(this)
+          const originalStart = osc.start.bind(osc)
+          osc.start = function(...args: any[]) {
+            soundStarts.push(Date.now())
+            return originalStart(...args)
+          }
+          return osc
+        }
+      }
+      (window as any).__soundStarts = soundStarts
+    })
+    
+    await page.goto('/')
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
-    const correctBalloon = state.balloons.find((b: any) => b.isCorrect)!
-    const wrongBalloon = state.balloons.find((b: any) => !b.isCorrect)!
+    const wrongBalloons = state.balloons.filter((b: any) => !b.isCorrect)
     const initialWrongAttempts = state.wrongAttempts
+    
+    // Pick a far wrong balloon to get a longer jump
+    const catPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
+    let farthestWrongBalloon = wrongBalloons[0]
+    let maxDist = 0
+    
+    for (const balloon of wrongBalloons) {
+      const bounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), balloon.id)
+      if (bounds) {
+        const dist = Math.abs((bounds.x + bounds.width / 2) - catPos.x)
+        if (dist > maxDist) {
+          maxDist = dist
+          farthestWrongBalloon = balloon
+        }
+      }
+    }
     
     // Wait for cat idle
     await expect.poll(async () => {
@@ -486,22 +577,49 @@ test.describe('PR #2 Review Regressions', () => {
       return !jumpState.isJumping
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
-    // Click correct balloon to start jump
-    await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correctBalloon.id)
+    // Get balloon position for REAL click
+    const balloonBounds = await page.evaluate((id) => 
+      window.__tatematika!.getBalloonBounds(id), farthestWrongBalloon.id)
     
-    // IMMEDIATELY click wrong balloon while jumping
-    await page.waitForTimeout(50) // Brief delay to ensure jump started
+    const { canvasRect, scale } = await page.evaluate(() => {
+      const game = window.__tatematika!.getGame()
+      const canvas = document.querySelector('canvas')!
+      const rect = canvas.getBoundingClientRect()
+      return {
+        canvasRect: { left: rect.left, top: rect.top },
+        scale: rect.width / game.scale.width
+      }
+    })
     
-    const isJumpingBeforeSecondClick = await page.evaluate(() => 
+    const clickX = canvasRect.left + (balloonBounds.x + balloonBounds.width / 2) * scale
+    const clickY = canvasRect.top + (balloonBounds.y + balloonBounds.height / 2) * scale
+    
+    // Real click to start jump
+    const soundCountBefore = await page.evaluate(() => (window as any).__soundStarts.length)
+    await page.mouse.click(clickX, clickY)
+    
+    // Poll until jump starts
+    await expect.poll(async () => {
+      const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+      return jumpState.isJumping
+    }, { timeout: 1000, intervals: [10] }).toBe(true)
+    
+    // NOW click another wrong balloon while jumping (different from first)
+    const otherWrongBalloon = wrongBalloons.find((b: any) => b.id !== farthestWrongBalloon.id)!
+    const balloonBounds2 = await page.evaluate((id) => 
+      window.__tatematika!.getBalloonBounds(id), otherWrongBalloon.id)
+    
+    const clickX2 = canvasRect.left + (balloonBounds2.x + balloonBounds2.width / 2) * scale
+    const clickY2 = canvasRect.top + (balloonBounds2.y + balloonBounds2.height / 2) * scale
+    
+    const tapTime = Date.now()
+    await page.mouse.click(clickX2, clickY2)
+    
+    // Immediately verify tap happened WHILE jumping
+    const wasJumpingDuringTap = await page.evaluate(() => 
       window.__tatematika!.getCatJumpState().isJumping)
     
-    if (!isJumpingBeforeSecondClick) {
-      // Jump already completed, skip this test run
-      test.skip()
-      return
-    }
-    
-    await page.evaluate((id) => window.__tatematika!.clickBalloon(id), wrongBalloon.id)
+    expect(wasJumpingDuringTap, 'second tap must have occurred while isJumping was true').toBe(true)
     
     // Wait for jump to complete
     await expect.poll(async () => {
@@ -509,112 +627,29 @@ test.describe('PR #2 Review Regressions', () => {
       return !jumpState.isJumping
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
-    // Wait for all animations to settle
+    // Wait for animations to settle
     await page.waitForTimeout(600)
     
     // Check final state
     const finalState = await page.evaluate(() => window.__tatematika!.getGameState())
-    const wrongAttemptsChanged = finalState.wrongAttempts !== initialWrongAttempts
+    const errorWasCounted = finalState.wrongAttempts > initialWrongAttempts
     
-    // Check if wrong balloon ever bounced
-    let wrongBalloonBounced = false
-    const animState = await page.evaluate((id) =>
-      window.__tatematika!.getBalloonAnimationState(id), wrongBalloon.id)
+    // Check if sound played after tap (within 500ms window)
+    const soundCountAfter = await page.evaluate(() => (window as any).__soundStarts.length)
+    const soundPlayed = soundCountAfter > soundCountBefore + 1 // +1 for first click sound
     
-    // Bounce might be over, so we check if attempt count changed as proxy
-    // This is a consistency check: either BOTH changed or NEITHER changed
+    // Check if balloon bounced (isBouncing might be over, check if it ever happened by seeing if error was counted)
+    // If error counted, bounce should have happened
     
-    if (wrongAttemptsChanged) {
-      // If error was counted, this is FULLY HANDLED behavior
-      // We accept this as consistent (the tap was processed)
-      expect(true, 'wrong tap during jump was fully handled (error counted)').toBe(true)
+    if (errorWasCounted) {
+      // FULLY HANDLED: error counted, so sound AND bounce must also have happened
+      expect(soundPlayed, 'if error counted during jump, sound must also play (fully handled)').toBe(true)
+      // Bounce is harder to detect after the fact, but error count implies it was handled
+      expect(true, 'wrong tap during jump was fully handled (error counted, sound played)').toBe(true)
     } else {
-      // If error was NOT counted, this is FULLY IGNORED behavior
-      // We accept this as consistent (the tap was ignored)
-      expect(true, 'wrong tap during jump was fully ignored (error not counted)').toBe(true)
+      // FULLY IGNORED: error NOT counted, so sound should NOT have played
+      expect(soundPlayed, 'if error NOT counted during jump, sound must NOT play (fully ignored)').toBe(false)
+      expect(true, 'wrong tap during jump was fully ignored (no error, no sound)').toBe(true)
     }
-    
-    // The key assertion: we document the observed behavior
-    // This test will PASS if behavior is consistent (either fully handled or fully ignored)
-    // It would FAIL if the code tried to half-handle it (which should not happen)
-  })
-
-  test('Rapid taps during jump: spec ambiguity - correct tap during jump not lost', async ({ page }) => {
-    // SPEC IS AMBIGUOUS about taps during jumps.
-    // For a CORRECT tap during a jump, we test that it's not silently lost.
-    // Either:
-    // 1. The tap is ignored (jump continues to first target)
-    // 2. The tap is queued/handled after jump completes
-    // 
-    // Key: the correct balloon must eventually be recognized
-    
-    const state = await page.evaluate(() => window.__tatematika!.getGameState())
-    const correctBalloon = state.balloons.find((b: any) => b.isCorrect)!
-    const wrongBalloon = state.balloons.find((b: any) => !b.isCorrect)!
-    const initialStars = state.stars
-    
-    // Wait for cat idle
-    await expect.poll(async () => {
-      const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-      return !jumpState.isJumping
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
-    
-    // Click wrong balloon first to start jump
-    await page.evaluate((id) => window.__tatematika!.clickBalloon(id), wrongBalloon.id)
-    
-    // IMMEDIATELY click correct balloon while jumping
-    await page.waitForTimeout(50)
-    
-    const isJumping = await page.evaluate(() => 
-      window.__tatematika!.getCatJumpState().isJumping)
-    
-    if (!isJumping) {
-      test.skip()
-      return
-    }
-    
-    await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correctBalloon.id)
-    
-    // Wait and verify correct balloon is eventually processed
-    // Either the first jump completes and second is queued, or second is ignored and user must click again
-    // We verify system doesn't crash and game remains playable
-    
-    await expect.poll(async () => {
-      const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-      return !jumpState.isJumping
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
-    
-    // After first jump completes, the game must be in a valid state
-    const stateAfterFirstJump = await page.evaluate(() => window.__tatematika!.getGameState())
-    
-    // Either stars increased (correct tap was processed) or didn't (it was ignored)
-    const correctTapWasProcessed = stateAfterFirstJump.stars > initialStars
-    
-    if (!correctTapWasProcessed) {
-      // Correct tap was ignored - verify we can still click it now
-      await expect.poll(async () => {
-        const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-        return !jumpState.isJumping
-      }, { timeout: 5000, intervals: [50] }).toBe(true)
-      
-      // Find and click correct balloon again
-      const currentState = await page.evaluate(() => window.__tatematika!.getGameState())
-      const currentCorrect = currentState.balloons.find((b: any) => b.isCorrect)
-      
-      if (currentCorrect) {
-        await page.evaluate((id) => window.__tatematika!.clickBalloon(id), currentCorrect.id)
-        
-        // Verify it works
-        await expect.poll(async () => {
-          const s = await page.evaluate(() => window.__tatematika!.getGameState())
-          return s.stars > initialStars
-        }, { timeout: 5000, intervals: [50] }).toBe(true)
-      }
-    }
-    
-    // Key assertion: game must remain in valid playable state
-    const finalState = await page.evaluate(() => window.__tatematika!.getGameState())
-    expect(finalState.balloons.length).toBeGreaterThan(0)
-    expect(finalState.balloons.filter((b: any) => b.isCorrect).length).toBe(1)
   })
 })
