@@ -423,7 +423,7 @@ async function testLayoutAndText(
   }
 }
 
-test.describe('Layout and Formula - 320×568', () => {
+test.describe('Layout and Formula - 320×568 @mobile', () => {
   test.use({ viewport: { width: 320, height: 568 } })
   
   test.beforeEach(async ({ page }) => {
@@ -444,7 +444,7 @@ test.describe('Layout and Formula - 320×568', () => {
   })
 })
 
-test.describe('Layout and Formula - 375×667', () => {
+test.describe('Layout and Formula - 375×667 @mobile', () => {
   test.use({ viewport: { width: 375, height: 667 } })
   
   test.beforeEach(async ({ page }) => {

@@ -13,8 +13,14 @@ export default defineConfig({
   },
   projects: [
     {
-      name: 'chromium',
+      name: 'desktop',
       use: { ...devices['Desktop Chrome'] },
+      grepInvert: /@mobile/,
+    },
+    {
+      name: 'mobile-deferred',
+      use: { ...devices['Desktop Chrome'] },
+      grep: /@mobile/,
     },
   ],
   webServer: {

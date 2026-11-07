@@ -319,7 +319,7 @@ test.describe('Safe Zones - Synthetic Validation', () => {
 })
 
 // Initial frame tests
-test.describe('Safe Zones - Initial Frame - 320×568', () => {
+test.describe('Safe Zones - Initial Frame - 320×568 @mobile', () => {
   test.use({ viewport: { width: 320, height: 568 } })
   
   test.beforeEach(async ({ page }) => {
@@ -343,7 +343,7 @@ test.describe('Safe Zones - Initial Frame - 320×568', () => {
   })
 })
 
-test.describe('Safe Zones - After Pop - 320×568', () => {
+test.describe('Safe Zones - After Pop - 320×568 @mobile', () => {
   test.use({ viewport: { width: 320, height: 568 } })
   
   test.beforeEach(async ({ page }) => {
@@ -371,7 +371,7 @@ test.describe('Safe Zones - After Pop - 320×568', () => {
 })
 
 // RESET phase tests - UI button reset
-test.describe('Safe Zones - After UI Reset - 320×568', () => {
+test.describe('Safe Zones - After UI Reset - 320×568 @mobile', () => {
   test.use({ viewport: { width: 320, height: 568 } })
   
   test.beforeEach(async ({ page }) => {
@@ -447,7 +447,7 @@ test.describe('Safe Zones - After UI Reset - 320×568', () => {
 })
 
 // RESET phase tests - page reload
-test.describe('Safe Zones - After Page Reload - 320×568', () => {
+test.describe('Safe Zones - After Page Reload - 320×568 @mobile', () => {
   test.use({ viewport: { width: 320, height: 568 } })
   
   test('Count 3: After reload, no balloon overlaps', async ({ page }) => {
@@ -533,7 +533,7 @@ test.describe('Safe Zones - After Page Reload - 320×568', () => {
 })
 
 // RESET phase tests for other viewports
-test.describe('Safe Zones - After UI Reset - 375×667', () => {
+test.describe('Safe Zones - After UI Reset - 375×667 @mobile', () => {
   test.use({ viewport: { width: 375, height: 667 } })
   
   test.beforeEach(async ({ page }) => {
@@ -605,7 +605,7 @@ test.describe('Safe Zones - After UI Reset - 375×667', () => {
   })
 })
 
-test.describe('Safe Zones - After Page Reload - 375×667', () => {
+test.describe('Safe Zones - After Page Reload - 375×667 @mobile', () => {
   test.use({ viewport: { width: 375, height: 667 } })
   
   test('Count 3: After reload, no balloon overlaps', async ({ page }) => {
@@ -1003,7 +1003,7 @@ async function checkSafeZonesDuringJump(page: any, viewport: string, count: numb
   expect(samples.length, 'Should have captured jump samples').toBeGreaterThan(0)
 }
 
-test.describe('Safe Zones - Mid-Jump - 320×568', () => {
+test.describe('Safe Zones - Mid-Jump - 320×568 @mobile', () => {
   test.use({ viewport: { width: 320, height: 568 } })
   
   test.beforeEach(async ({ page }) => {
@@ -1027,7 +1027,7 @@ test.describe('Safe Zones - Mid-Jump - 320×568', () => {
   })
 })
 
-test.describe('Safe Zones - Mid-Jump - 375×667', () => {
+test.describe('Safe Zones - Mid-Jump - 375×667 @mobile', () => {
   test.use({ viewport: { width: 375, height: 667 } })
   
   test.beforeEach(async ({ page }) => {
@@ -1292,7 +1292,7 @@ test.describe('Pixel Ground-Truth Validation', () => {
     expect(selfTestPixelValidation()).toBe(true)
   })
   
-  test('320×568 count 3: CommandBuffer bounds match painted pixels', async ({ page }) => {
+  test('320×568 count 3: CommandBuffer bounds match painted pixels @mobile', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 568 })
     await page.goto('/')
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })

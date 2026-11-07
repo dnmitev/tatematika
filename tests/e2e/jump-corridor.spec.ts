@@ -264,7 +264,8 @@ const viewports = [
 ]
 
 for (const vp of viewports) {
-  test.describe(`Jump Corridor - ${vp.name}`, () => {
+  const isMobile = vp.width === 320 || vp.width === 375
+  test.describe(`Jump Corridor - ${vp.name}${isMobile ? ' @mobile' : ''}`, () => {
     test.use({ viewport: { width: vp.width, height: vp.height } })
     
     test.beforeEach(async ({ page }) => {
