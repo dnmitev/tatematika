@@ -47,6 +47,8 @@ export class GameScene extends Phaser.Scene {
   private jumpContactMade: boolean = false
   private popAnimationStartTime: number = 0
   private popAnimationCompleted: boolean = false
+  private activeAudioContexts: AudioContext[] = []
+  private activeOscillators: { oscillator: OscillatorNode, gainNode: GainNode, context: AudioContext }[] = []
   
   private settingsUI!: SettingsUI
   private levelCompleteUI!: LevelCompleteUI
@@ -60,6 +62,20 @@ export class GameScene extends Phaser.Scene {
   }
 
   shutdown() {
+    // Stop and clean up all active audio
+    for (const { oscillator, gainNode, context } of this.activeOscillators) {
+      try {
+        oscillator.stop(0)
+        oscillator.disconnect()
+        gainNode.disconnect()
+        context.close()
+      } catch (e) {
+        // Already stopped/disconnected
+      }
+    }
+    this.activeOscillators = []
+    this.activeAudioContexts = []
+    
     if (this.settingsButton && this.settingsButton.parentElement) {
       this.settingsButton.removeEventListener('click', () => this.openSettings())
       this.settingsButton.remove()
@@ -603,6 +619,9 @@ export class GameScene extends Phaser.Scene {
       gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1)
       oscillator.start(audioContext.currentTime)
       oscillator.stop(audioContext.currentTime + 0.1)
+      
+      // Track for mute functionality
+      this.activeOscillators.push({ oscillator, gainNode, context: audioContext })
     } else if (soundName === 'boing') {
       oscillator.frequency.setValueAtTime(200, audioContext.currentTime)
       oscillator.frequency.exponentialRampToValueAtTime(600, audioContext.currentTime + 0.2)
@@ -610,6 +629,9 @@ export class GameScene extends Phaser.Scene {
       gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2)
       oscillator.start(audioContext.currentTime)
       oscillator.stop(audioContext.currentTime + 0.2)
+      
+      // Track for mute functionality
+      this.activeOscillators.push({ oscillator, gainNode, context: audioContext })
     } else if (soundName === 'meow') {
       oscillator.frequency.setValueAtTime(400, audioContext.currentTime)
       oscillator.frequency.exponentialRampToValueAtTime(600, audioContext.currentTime + 0.15)
@@ -618,6 +640,9 @@ export class GameScene extends Phaser.Scene {
       gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3)
       oscillator.start(audioContext.currentTime)
       oscillator.stop(audioContext.currentTime + 0.3)
+      
+      // Track for mute functionality
+      this.activeOscillators.push({ oscillator, gainNode, context: audioContext })
     } else if (soundName === 'level-complete') {
       const notes = [523.25, 587.33, 659.25, 783.99]
       notes.forEach((freq, i) => {
@@ -630,6 +655,9 @@ export class GameScene extends Phaser.Scene {
         gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + i * 0.2 + 0.3)
         osc.start(audioContext.currentTime + i * 0.2)
         osc.stop(audioContext.currentTime + i * 0.2 + 0.3)
+        
+        // Track for mute functionality
+        this.activeOscillators.push({ oscillator: osc, gainNode: gain, context: audioContext })
       })
     }
   }
@@ -851,6 +879,37 @@ export class GameScene extends Phaser.Scene {
   private toggleMute() {
     this.isMuted = !this.isMuted
     this.muteButton.setText(this.isMuted ? '🔇' : '🔊')
+    
+    if (this.isMuted) {
+      // Stop all currently playing or scheduled sounds
+      for (const { oscillator, gainNode, context } of this.activeOscillators) {
+        try {
+          // Immediately set gain to 0 to silence
+          gainNode.gain.cancelScheduledValues(context.currentTime)
+          gainNode.gain.setValueAtTime(0, context.currentTime)
+          
+          // Stop the oscillator immediately
+          try {
+            oscillator.stop(context.currentTime)
+          } catch (e) {
+            // Oscillator may already be stopped
+          }
+          
+          // Disconnect to ensure silence
+          try {
+            oscillator.disconnect()
+            gainNode.disconnect()
+          } catch (e) {
+            // Already disconnected
+          }
+        } catch (e) {
+          // Ignore errors from already-stopped oscillators
+        }
+      }
+      
+      // Clear tracking arrays
+      this.activeOscillators = []
+    }
   }
 
   public openSettings() {
