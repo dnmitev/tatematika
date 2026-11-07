@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS } from './test-timeouts'
 
 /**
  * E2E tests for "Котето и балоните"
@@ -31,7 +32,7 @@ test.describe('Котето и балоните - E2E', () => {
     await page.goto('/')
     
     // Wait for game to initialize
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
 
   test('К1: Round start - has 3 balloons with target 0-6 and exactly one correct', async ({ page }) => {
@@ -61,7 +62,7 @@ test.describe('Котето и балоните - E2E', () => {
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       return !jumpState.isJumping
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     // Wait for balloon to be ready (not animating)
     await expect.poll(async () => {
@@ -73,7 +74,7 @@ test.describe('Котето и балоните - E2E', () => {
       return balloonBounds !== null && 
              !balloonAnim.isPopping && 
              !balloonAnim.isBouncing
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     // When cat jumps and pops it
     await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correctBalloon.id)
@@ -82,7 +83,7 @@ test.describe('Котето и балоните - E2E', () => {
     await expect.poll(async () => {
       const s = await page.evaluate(() => window.__tatematika!.getGameState())
       return s.stars
-    }, { timeout: 10000, intervals: [50] }).toBe(initialStars + 1)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(initialStars + 1)
     
     const newState = await page.evaluate(() => window.__tatematika!.getGameState())
     
@@ -202,7 +203,7 @@ test.describe('Котето и балоните - E2E', () => {
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       return !jumpState.isJumping
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
     // Click the correct balloon to ensure we can verify stars increment
@@ -218,7 +219,7 @@ test.describe('Котето и балоните - E2E', () => {
       return balloonBounds !== null && 
              !balloonAnim.isPopping && 
              !balloonAnim.isBouncing
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     // Then cat goes to balloon and jumps
     await page.evaluate((id) => window.__tatematika!.clickBalloon(id), targetBalloon.id)
@@ -227,7 +228,7 @@ test.describe('Котето и балоните - E2E', () => {
     await expect.poll(async () => {
       const newState = await page.evaluate(() => window.__tatematika!.getGameState())
       return newState.stars
-    }, { timeout: 10000, intervals: [50] }).toBe(state.stars + 1)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(state.stars + 1)
     
     // Verify final state
     const newState = await page.evaluate(() => window.__tatematika!.getGameState())

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { INIT_TIMEOUT_MS } from './test-timeouts'
 
 /**
  * Tests for parent settings UI
@@ -9,12 +10,12 @@ import { test, expect } from '@playwright/test'
 test.describe('Parent Settings UI', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
     
     // Clear localStorage to start fresh
     await page.evaluate(() => localStorage.clear())
     await page.reload()
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
 
   test('Settings UI must be accessible from game', async ({ page }) => {
@@ -63,7 +64,7 @@ test.describe('Parent Settings UI', () => {
     
     // Verify it persists after reload
     await page.reload()
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
     
     const stateAfterReload = await page.evaluate(() => window.__tatematika!.getGameState())
     expect(stateAfterReload.settings.upperLimit).toBe(10)
@@ -186,7 +187,7 @@ test.describe('Parent Settings UI', () => {
     
     // Reload page
     await page.reload()
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
     
     // All settings should persist
     const state = await page.evaluate(() => window.__tatematika!.getGameState())

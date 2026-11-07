@@ -1,4 +1,5 @@
 import { expect, Page } from '@playwright/test'
+import { ACTION_TIMEOUT_MS } from './test-timeouts'
 
 /**
  * Get game scale and canvas dimensions using live game.scale.width/height
@@ -241,7 +242,7 @@ export async function popCorrectBalloonAndWait(page: any) {
     }
     return true
   }, { 
-    timeout: 5000, 
+    timeout: ACTION_TIMEOUT_MS, 
     intervals: [50],
     message: () => {
       const last = (page as any)._lastReadinessSample
@@ -262,7 +263,7 @@ export async function popCorrectBalloonAndWait(page: any) {
   await expect.poll(async () => {
     const s = await page.evaluate(() => window.__tatematika!.getGameState())
     return s.stars
-  }, { timeout: 10000, intervals: [50] }).toBe(prevStars + 1)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(prevStars + 1)
   
   // Wait for new round to be ready with observable facts per spec:
   // - Cat is idle (not jumping)
@@ -299,5 +300,5 @@ export async function popCorrectBalloonAndWait(page: any) {
     return !combinedState.isJumping && 
            combinedState.correctCount === 1 && 
            combinedState.formulaValid
-  }, { timeout: 10000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
 }

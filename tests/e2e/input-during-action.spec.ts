@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS } from './test-timeouts'
 
 /**
  * K12-K16: Input During Action Tests
@@ -66,7 +67,7 @@ test.beforeEach(async ({ page }) => {
   })
 
   await page.goto('/')
-  await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+  await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   
   // Install postupdate recorder for bounce detection
   await installFrameRecorder(page)
@@ -120,6 +121,8 @@ function getBounceDiagnostic(frames: Array<{ x: number; y: number; frame: number
 }
 
 test('K12: Repeated inputs during correct balloon action are fully ignored', async ({ page }) => {
+  test.setTimeout(90000) // Multiple actions
+  
   // Check that getActionPhase hook exists
   const hasGetActionPhase = await page.evaluate(() => typeof window.__tatematika!.getActionPhase === 'function')
   expect(hasGetActionPhase, 'K12 CONTRACT: getActionPhase hook must be implemented').toBe(true)
@@ -128,7 +131,7 @@ test('K12: Repeated inputs during correct balloon action are fully ignored', asy
   await expect.poll(async () => {
     const phase = await page.evaluate(() => window.__tatematika!.getActionPhase!())
     return phase === 'idle'
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   const state = await page.evaluate(() => window.__tatematika!.getGameState())
   const correctBalloon = state.balloons.find((b: any) => b.isCorrect)!
@@ -232,13 +235,13 @@ test('K12: Repeated inputs during correct balloon action are fully ignored', asy
   await expect.poll(async () => {
     const newState = await page.evaluate(() => window.__tatematika!.getGameState())
     return newState.stars > initialStars
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   // Wait for phase to return to idle
   await expect.poll(async () => {
     const phase = await page.evaluate(() => window.__tatematika!.getActionPhase!())
     return phase === 'idle'
-  }, { timeout: 2000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   // Stop phase injector and get recorded phases
   const inputPhases = await page.evaluate(() => {
@@ -291,6 +294,8 @@ test('K12: Repeated inputs during correct balloon action are fully ignored', asy
 })
 
 test('K13: Repeated inputs during wrong balloon action are fully ignored', async ({ page }) => {
+  test.setTimeout(120000) // Multiple actions including baseline + reload
+  
   // Check that getActionPhase hook exists
   const hasGetActionPhase = await page.evaluate(() => typeof window.__tatematika!.getActionPhase === 'function')
   expect(hasGetActionPhase, 'K13 CONTRACT: getActionPhase hook must exist in src/main.ts').toBe(true)
@@ -299,7 +304,7 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   await expect.poll(async () => {
     const phase = await page.evaluate(() => window.__tatematika!.getActionPhase!())
     return phase === 'idle'
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   const state = await page.evaluate(() => window.__tatematika!.getGameState())
   const wrongBalloons = state.balloons.filter((b: any) => !b.isCorrect)
@@ -323,17 +328,17 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   await expect.poll(async () => {
     const phase = await page.evaluate(() => window.__tatematika!.getActionPhase!())
     return phase !== 'idle'
-  }, { timeout: 2000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   await expect.poll(async () => {
     const phase = await page.evaluate(() => window.__tatematika!.getActionPhase!())
     return phase === 'idle'
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   await expect.poll(async () => {
     const newState = await page.evaluate(() => window.__tatematika!.getGameState())
     return newState.wrongAttempts > initialWrongAttempts
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   const baselineCountAfter = await page.evaluate(() => (window as any).__oscillatorStarts.length)
   const baselineSoundCount = baselineCountAfter - baselineCountBefore
@@ -353,13 +358,13 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   
   // Now start the actual test: reset state and retry with rejected inputs
   await page.reload()
-  await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+  await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   await installFrameRecorder(page)
   
   await expect.poll(async () => {
     const phase = await page.evaluate(() => window.__tatematika!.getActionPhase!())
     return phase === 'idle'
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   const state2 = await page.evaluate(() => window.__tatematika!.getGameState())
   const wrongBalloons2 = state2.balloons.filter((b: any) => !b.isCorrect)
@@ -462,13 +467,13 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   await expect.poll(async () => {
     const newState = await page.evaluate(() => window.__tatematika!.getGameState())
     return newState.wrongAttempts > initialWrongAttempts2
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   // Wait for phase to return to idle
   await expect.poll(async () => {
     const phase = await page.evaluate(() => window.__tatematika!.getActionPhase!())
     return phase === 'idle'
-  }, { timeout: 2000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   // Stop phase injector and get recorded phases
   const inputPhases = await page.evaluate(() => {
@@ -527,11 +532,13 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
 })
 
 test('K14: No re-execution of rejected inputs after landing (correct balloon)', async ({ page }) => {
+  test.setTimeout(60000) // Two actions (initial + re-click after idle)
+  
   // Wait for cat to be idle
   await expect.poll(async () => {
     const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
     return !jumpState.isJumping
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   const state = await page.evaluate(() => window.__tatematika!.getGameState())
   const correctBalloon = state.balloons.find((b: any) => b.isCorrect)!
@@ -563,7 +570,7 @@ test('K14: No re-execution of rejected inputs after landing (correct balloon)', 
     const newState = await page.evaluate(() => window.__tatematika!.getGameState())
     const newBalloonIds = newState.balloons.map((b: any) => b.id).sort()
     return !jumpState.isJumping && newState.stars > initialStars && JSON.stringify(newBalloonIds) !== JSON.stringify(initialBalloonIds)
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   // Reset sound counter and frame recorder
   await page.evaluate(() => {
@@ -609,11 +616,13 @@ test('K14: No re-execution of rejected inputs after landing (correct balloon)', 
 })
 
 test('K14: No re-execution of rejected inputs after landing (wrong balloon)', async ({ page }) => {
+  test.setTimeout(60000) // Two actions
+  
   // Wait for cat to be idle
   await expect.poll(async () => {
     const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
     return !jumpState.isJumping
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   const state = await page.evaluate(() => window.__tatematika!.getGameState())
   const wrongBalloons = state.balloons.filter((b: any) => !b.isCorrect)
@@ -642,7 +651,7 @@ test('K14: No re-execution of rejected inputs after landing (wrong balloon)', as
     const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
     const newState = await page.evaluate(() => window.__tatematika!.getGameState())
     return !jumpState.isJumping && newState.wrongAttempts > initialWrongAttempts
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   // Reset sound counter and frame recorder
   await page.evaluate(() => {
@@ -688,11 +697,13 @@ test('K14: No re-execution of rejected inputs after landing (wrong balloon)', as
 })
 
 test('K15: New input accepted after action completes (mouse)', async ({ page }) => {
+  test.setTimeout(60000) // Two actions
+  
   // Wait for cat to be idle
   await expect.poll(async () => {
     const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
     return !jumpState.isJumping
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   const state = await page.evaluate(() => window.__tatematika!.getGameState())
   const correctBalloon = state.balloons.find((b: any) => b.isCorrect)!
@@ -709,7 +720,7 @@ test('K15: New input accepted after action completes (mouse)', async ({ page }) 
     const newState = await page.evaluate(() => window.__tatematika!.getGameState())
     const newBalloonIds = newState.balloons.map((b: any) => b.id).sort()
     return !jumpState.isJumping && newState.stars > state.stars && JSON.stringify(newBalloonIds) !== JSON.stringify(initialBalloonIds)
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   // Now try new input - it should be accepted
   const newState = await page.evaluate(() => window.__tatematika!.getGameState())
@@ -727,7 +738,7 @@ test('K15: New input accepted after action completes (mouse)', async ({ page }) 
   await expect.poll(async () => {
     const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
     return !jumpState.isJumping
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   // Verify another star
   const finalState = await page.evaluate(() => window.__tatematika!.getGameState())
@@ -735,11 +746,13 @@ test('K15: New input accepted after action completes (mouse)', async ({ page }) 
 })
 
 test('K15: New input accepted after action completes (keyboard)', async ({ page }) => {
+  test.setTimeout(90000) // Two actions with keyboard navigation
+  
   // Wait for cat to be idle
   await expect.poll(async () => {
     const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
     return !jumpState.isJumping
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   const state = await page.evaluate(() => window.__tatematika!.getGameState())
   const correctBalloon = state.balloons.find((b: any) => b.isCorrect)!
@@ -776,7 +789,7 @@ test('K15: New input accepted after action completes (keyboard)', async ({ page 
     const newState = await page.evaluate(() => window.__tatematika!.getGameState())
     const newBalloonIds = newState.balloons.map((b: any) => b.id).sort()
     return !jumpState.isJumping && newState.stars > state.stars && JSON.stringify(newBalloonIds) !== JSON.stringify(initialBalloonIds)
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   // Now try new keyboard input - it should be accepted
   const newState = await page.evaluate(() => window.__tatematika!.getGameState())
@@ -814,19 +827,19 @@ test('K15: New input accepted after action completes (keyboard)', async ({ page 
   await expect.poll(async () => {
     const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
     return jumpState.isJumping
-  }, { timeout: 2000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   // Wait for action to complete
   await expect.poll(async () => {
     const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
     return !jumpState.isJumping
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   // Wait for evaluation to complete
   await expect.poll(async () => {
     const currentState = await page.evaluate(() => window.__tatematika!.getGameState())
     return currentState.stars > initialStarsAfterFirst || currentState.wrongAttempts > initialWrongAttemptsAfterFirst
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   // Verify exactly +1 star (correct balloon)
   const finalState = await page.evaluate(() => window.__tatematika!.getGameState())

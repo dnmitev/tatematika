@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS } from './test-timeouts'
 
 /**
  * Shuffle Distribution E2E Tests
@@ -65,7 +66,7 @@ async function setBalloonCount(page: any, count: number) {
       return scene.balloonSprites.length
     })
     return actualCount
-  }, { timeout: 5000, intervals: [50] }).toBe(count)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(count)
 }
 
 interface CellPosition {
@@ -150,7 +151,7 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
         return scene.balloonSprites.length
       })
       return !jumpState.isJumping && spriteCount === count
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
     const correctBalloon = state.balloons.find((b: any) => b.isCorrect)!
@@ -243,7 +244,7 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       return jumpState.isJumping
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     // Wait for new round: cat idle, correct sprite count, and round token incremented
     await expect.poll(async () => {
@@ -255,7 +256,7 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
       })
       const newToken = await page.evaluate(() => window.__roundToken)
       return !jumpState.isJumping && spriteCount === count && newToken > tokenBeforeClick
-    }, { timeout: 10000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   }
   
   return { slots, cells, roundTokens, levelCompleteAppeared }
@@ -278,7 +279,7 @@ test.describe('Shuffle Distribution - 1280×800', () => {
     try {
       await page.addInitScript(getMulberry32Code(SEED_A))
       await page.goto('/')
-      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
       
       await setBalloonCount(page, count)
       const result = await playRoundsAndRecordSlots(page, count, rounds)
@@ -304,7 +305,7 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       // First run: record slots with Seed A
       await page.addInitScript(getMulberry32Code(SEED_A))
       await page.goto('/')
-      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
       
       // K17 CONTRACT CHECK: setRoundRng hook must be implemented
       const hasSetRoundRng = await page.evaluate(() => typeof window.__tatematika!.setRoundRng === 'function')
@@ -316,7 +317,7 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       // Second run: verify determinism with same seed
       await page.addInitScript(getMulberry32Code(SEED_A))
       await page.goto('/')
-      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
       
       await setBalloonCount(page, count)
       const result2 = await playRoundsAndRecordSlots(page, count, rounds, SEED_A)
@@ -356,7 +357,7 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       // Record slots with Seed B
       await page.addInitScript(getMulberry32Code(SEED_B))
       await page.goto('/')
-      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
       
       // K17 CONTRACT CHECK: setRoundRng hook must be implemented
       const hasSetRoundRng = await page.evaluate(() => typeof window.__tatematika!.setRoundRng === 'function')
@@ -392,7 +393,7 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       
       await page.addInitScript(getMulberry32Code(SEED_A))
       await page.goto('/')
-      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
       
       // K17 CONTRACT CHECK: setRoundRng hook must be implemented for shuffle to work
       const hasSetRoundRng = await page.evaluate(() => typeof window.__tatematika!.setRoundRng === 'function')
@@ -444,7 +445,7 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       
       await page.addInitScript(getMulberry32Code(SEED_B))
       await page.goto('/')
-      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
       
       // K17 CONTRACT CHECK: setRoundRng hook must be implemented for shuffle to work
       const hasSetRoundRng = await page.evaluate(() => typeof window.__tatematika!.setRoundRng === 'function')

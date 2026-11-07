@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS } from './test-timeouts'
 import { getCatPaintedBounds } from './helpers'
 
 /**
@@ -173,7 +174,7 @@ async function checkJumpCorridorForBalloon(
   await expect.poll(async () => {
     const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
     return jumpState.isJumping
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
   // Stop recording and retrieve frames
   const recordedFrames = await page.evaluate(() => {
@@ -200,7 +201,7 @@ async function checkJumpCorridor(page: any, viewport: string, count: number, rou
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       return !jumpState.isJumping
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
     const correctBalloon = state.balloons.find((b: any) => b.isCorrect)!
@@ -249,14 +250,14 @@ async function checkJumpCorridor(page: any, viewport: string, count: number, rou
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       return !jumpState.isJumping
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     // Wait for new round to start (new balloon ID set or star count increase)
     await expect.poll(async () => {
       const newState = await page.evaluate(() => window.__tatematika!.getGameState())
       const newBalloonIds = newState.balloons.map((b: any) => b.id).sort()
       return newState.stars > state.stars || JSON.stringify(newBalloonIds) !== JSON.stringify(initialBalloonIds)
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     // Assert violations after round completes (red on violations, not timeout)
     expect(violations, violations.join('\n')).toEqual([])
@@ -276,7 +277,7 @@ for (const vp of viewports) {
     
     test.beforeEach(async ({ page }) => {
       await page.goto('/')
-      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
     })
     
     for (const count of [3, 4, 5]) {
