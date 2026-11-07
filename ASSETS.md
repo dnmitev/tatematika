@@ -14,6 +14,21 @@ All visual assets in this game are created programmatically using Phaser 3's Gra
 - Two triangular ears
 - White circles with black pupils for eyes
 - Curved line for smiling mouth
+- Swaying tail and paws
+
+**Animation (К23)**: Native Phaser animation, redrawn every frame from code in `drawCat()` (pose chosen by `getCatPose()`). Nothing is loaded from a file or another site.
+- Rest: tail sway, gentle breathing, slowly looking around
+- Walk: faster tail, alternating paws, eyes look in the walking direction
+- Jump: stretched body, eyes up
+- Landing: short squash (250 ms) with no extra input lock
+- Correct answer: wider smile and quick tail wag; after a wrong answer the cat keeps its normal smile
+- The whole drawing stays inside the cat's ear-to-ear width, and alpha and visibility never change (no blinking)
+
+### Feedback icons (К21, К22)
+
+**Source**: Inline SVG markup written for this project in `src/scenes/GameScene.ts` (`CUP_SVG`, `RED_X_SVG`)  
+**License**: CC0 / Public Domain (created specifically for this project)  
+**Description**: A gold cup with the accessible name „Вярно“ and a red X with the accessible name „Грешно“. The shapes differ so meaning does not rely on colour alone, and the names are not shown as text.
 
 ### Balloons (Балоните)
 
@@ -21,8 +36,10 @@ All visual assets in this game are created programmatically using Phaser 3's Gra
 **License**: CC0 / Public Domain (created specifically for this project)  
 **Location**: `src/scenes/GameScene.ts`, method `drawBalloon()`  
 **Description**: Simple circular balloons in various colors:
-- Colors: Red (#FF6B6B), Yellow (#FFD93D), Green (#6BCB77), Blue (#4D96FF), Purple (#A78BFA)
+- Colors: Red (#FF6B6B), Yellow (#FFD93D), Blue (#4D96FF), Green (#6BCB77), Purple (#A78BFA)
+- Each balloon keeps one colour while on screen (picked from its position and the round, not at random per draw)
 - Each balloon is a filled circle with a thin string line
+- Hint: a constant orange outline on the correct balloon after two wrong attempts
 - Math formulas are rendered as text overlays using Phaser.GameObjects.Text
 
 ### Background
