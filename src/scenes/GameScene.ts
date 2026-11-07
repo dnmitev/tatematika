@@ -3,7 +3,7 @@ import type { GameState, Balloon } from '../game-logic/types'
 import { createInitialState, addStar, isLevelComplete, startNewLevel } from '../game-logic/scoring'
 import { checkBalloon, handleCorrectPop, handleWrongAttempt, shouldShowHint, resetBalloons, createRound } from '../game-logic/round'
 import { loadSettings, saveSettings, updateSetting, DEFAULT_SETTINGS } from '../game-logic/settings'
-import { getPraiseMessage, WRONG_ANSWER_MESSAGE, LEVEL_COMPLETE_TITLE, LEVEL_COMPLETE_MESSAGE } from '../game-logic/strings'
+import { CORRECT_ANSWER_LABEL, WRONG_ANSWER_MESSAGE, TARGET_INSTRUCTION, LEVEL_COMPLETE_TITLE, LEVEL_COMPLETE_MESSAGE } from '../game-logic/strings'
 import { SettingsUI } from '../settings-ui'
 import { LevelCompleteUI } from '../level-complete-ui'
 
@@ -11,6 +11,12 @@ import { LevelCompleteUI } from '../level-complete-ui'
 const CAT_HALF_WIDTH = 30
 // Matches the approved jump-corridor spec: cat half-width plus 4px on each side
 const JUMP_CORRIDOR_MARGIN = 4
+const BALLOON_COLORS = [0xFF6B6B, 0xFFD93D, 0x4D96FF, 0x6BCB77, 0xA78BFA]
+const HINT_OUTLINE_COLOR = 0xFF8C00
+const CUP_SVG = '<svg viewBox="0 0 64 64" width="100%" height="100%" aria-hidden="true" focusable="false"><path d="M18 8h28v14c0 9-6 16-14 16s-14-7-14-16z" fill="#FFC107" stroke="#B8860B" stroke-width="2"/><path d="M18 12H9c0 9 4 14 10 15M46 12h9c0 9-4 14-10 15" fill="none" stroke="#B8860B" stroke-width="4" stroke-linecap="round"/><rect x="28" y="38" width="8" height="10" fill="#FFC107" stroke="#B8860B" stroke-width="2"/><rect x="18" y="48" width="28" height="8" rx="2" fill="#FFC107" stroke="#B8860B" stroke-width="2"/></svg>'
+const RED_X_SVG = '<svg viewBox="0 0 64 64" width="100%" height="100%" aria-hidden="true" focusable="false"><path d="M14 14L50 50M50 14L14 50" stroke="#E53935" stroke-width="12" stroke-linecap="round"/></svg>'
+
+type CatPose = 'idle' | 'walk' | 'jump' | 'landing' | 'happy'
 
 interface BalloonSprite {
   id: string
@@ -18,6 +24,11 @@ interface BalloonSprite {
   text: Phaser.GameObjects.Text
   y: number
   x: number
+  spawnY: number
+  color: number
+  width: number
+  height: number
+  hasHintOutline: boolean
   isCorrect: boolean
   isBouncing: boolean
   isPopping: boolean
@@ -38,12 +49,15 @@ export class GameScene extends Phaser.Scene {
   private targetText!: Phaser.GameObjects.Text
   private starsText!: Phaser.GameObjects.Text
   private wrongAttemptsText!: Phaser.GameObjects.Text
-  private feedbackText!: Phaser.GameObjects.Text
+  private feedbackIcon: HTMLDivElement | null = null
   private muteButton!: Phaser.GameObjects.Text
   private settingsButton!: HTMLButtonElement
   private isMuted: boolean = false
   private balloonSpeed: number = 30
-  private praiseIndex: number = 0
+  private roundColorOffset: number = 0
+  private colorRoundKey: string = ''
+  private landingStartTime: number = 0
+  private happyUntil: number = 0
   private levelEndText: string | null = null
   private lastPlayedSound: string | null = null
   private soundPlayCount: number = 0
@@ -83,6 +97,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.activeOscillators = []
     this.activeAudioContexts = []
+    this.clearFeedbackIcon()
     
     if (this.settingsButton && this.settingsButton.parentElement) {
       this.settingsButton.removeEventListener('click', () => this.openSettings())
@@ -146,6 +161,7 @@ export class GameScene extends Phaser.Scene {
       this.levelCompleteUI.destroy()
     }
     
+    this.clearFeedbackIcon()
     this.calculateFontSizes()
     this.children.removeAll(true)
     
@@ -223,26 +239,66 @@ export class GameScene extends Phaser.Scene {
     return calculatedJump
   }
 
+  private getCatPose(): CatPose {
+    const now = this.time.now
+    if (this.catIsJumping) return 'jump'
+    if (this.landingStartTime > 0 && now - this.landingStartTime < 250) return 'landing'
+    if (Math.abs(this.catX - this.catTargetX) > 2) return 'walk'
+    if (now < this.happyUntil) return 'happy'
+    return 'idle'
+  }
+
+  // Everything stays inside x ± CAT_HALF_WIDTH and below the ear tips at y - 40,
+  // so the painted bounds used for the jump corridor do not change with the pose.
   private drawCat(graphics: Phaser.GameObjects.Graphics, x: number, y: number) {
+    const pose = this.getCatPose()
+    const t = (this.time?.now ?? 0) / 1000
     graphics.clear()
-    
+
+    const tailPeriod = pose === 'walk' ? 0.5 : pose === 'happy' ? 0.4 : 1.2
+    const sway = Math.sin((t * Math.PI * 2) / tailPeriod) * 6
+    graphics.lineStyle(5, 0xE69500, 1)
+    graphics.beginPath()
+    graphics.moveTo(x + 16, y + 12)
+    graphics.lineTo(x + 25, y + 2)
+    graphics.lineTo(x + 23 + sway * 0.4, y - 14 + sway)
+    graphics.strokePath()
+
+    let bodyWidth = 50
+    let bodyHeight = 45 + Math.sin(t * Math.PI * 1.25) * 1.5
+    if (pose === 'jump') {
+      bodyWidth = 46
+      bodyHeight = 49
+    } else if (pose === 'landing') {
+      bodyWidth = 56
+      bodyHeight = 39
+    }
     graphics.fillStyle(0xFFA500, 1)
-    graphics.fillEllipse(x, y, 50, 45)
-    
-    graphics.fillStyle(0xFFA500, 1)
+    graphics.fillEllipse(x, y, bodyWidth, bodyHeight)
+
     graphics.fillTriangle(x - 25, y - 20, x - 30, y - 40, x - 18, y - 25)
     graphics.fillTriangle(x + 25, y - 20, x + 30, y - 40, x + 18, y - 25)
-    
+
+    const step = pose === 'walk' ? Math.sin(t * Math.PI * 5) * 3 : 0
+    const pawY = pose === 'jump' ? y + 16 : y + 17
+    graphics.fillStyle(0xFFE0B2, 1)
+    graphics.fillEllipse(x - 12, pawY - Math.max(0, step), 12, 8)
+    graphics.fillEllipse(x + 12, pawY - Math.max(0, -step), 12, 8)
+
+    const lookX = pose === 'walk'
+      ? Math.sign(this.catTargetX - this.catX) * 2
+      : Math.round(Math.sin(t * 0.9) * 2)
+    const lookY = pose === 'happy' || pose === 'jump' ? -2 : 0
     graphics.fillStyle(0xFFFFFF, 1)
     graphics.fillCircle(x - 12, y - 8, 6)
     graphics.fillCircle(x + 12, y - 8, 6)
     graphics.fillStyle(0x000000, 1)
-    graphics.fillCircle(x - 12, y - 8, 4)
-    graphics.fillCircle(x + 12, y - 8, 4)
-    
+    graphics.fillCircle(x - 12 + lookX, y - 8 + lookY, 4)
+    graphics.fillCircle(x + 12 + lookX, y - 8 + lookY, 4)
+
     graphics.lineStyle(2, 0x000000, 1)
     graphics.beginPath()
-    graphics.arc(x, y + 8, 10, 0, Math.PI, false)
+    graphics.arc(x, y + 6, pose === 'happy' ? 12 : 10, 0, Math.PI, false)
     graphics.strokePath()
   }
 
@@ -264,20 +320,8 @@ export class GameScene extends Phaser.Scene {
 
     const hudBottomMargin = Math.max(80, this.targetFontSize + 40)
     const targetY = this.scale.height - hudBottomMargin + 15
-    
-    this.add.text(10, targetY, 'Цел:', {
-      fontSize: `${hudSize}px`,
-      color: '#000000',
-      fontStyle: 'bold'
-    })
 
-    this.targetText = this.add.text(10 + hudSize * 3, targetY - 5, '', {
-      fontSize: `${this.targetFontSize}px`,
-      color: '#000000',
-      fontStyle: 'bold',
-      backgroundColor: '#FFEB3B',
-      padding: { x: 8, y: 4 }
-    })
+    this.createTopPanel(controlRowHeight, muteSize)
 
     this.starsText = this.add.text(10, titleY + titleSize / 2 + 10, '', {
       fontSize: `${hudSize}px`,
@@ -289,14 +333,6 @@ export class GameScene extends Phaser.Scene {
       fontSize: `${Math.max(14, hudSize - 2)}px`,
       color: '#555555'
     }).setOrigin(1, 0)
-
-    this.feedbackText = this.add.text(centerX, this.scale.height / 2, '', {
-      fontSize: `${Math.max(24, Math.min(40, this.scale.width / 12))}px`,
-      color: '#FF1493',
-      fontStyle: 'bold',
-      backgroundColor: '#FFFFFF',
-      padding: { x: 12, y: 6 }
-    }).setOrigin(0.5).setVisible(false)
 
     this.muteButton = this.add.text(this.scale.width - muteSize - 10, 10, '🔊', {
       fontSize: `${muteSize * 0.8}px`
@@ -312,6 +348,49 @@ export class GameScene extends Phaser.Scene {
     this.levelCompleteUI = new LevelCompleteUI()
 
     this.updateUI()
+  }
+
+  private createTopPanel(controlRowHeight: number, muteSize: number) {
+    const settingsSize = Math.max(64, Math.min(72, window.innerWidth / 6))
+    const freeRight = this.scale.width - (muteSize + 20 + settingsSize) - 10
+    const instructionSize = Math.max(24, Math.min(36, this.scale.width / 32))
+    const panelFontSize = Math.min(this.targetFontSize, controlRowHeight - 28)
+    const centerY = controlRowHeight / 2
+    const padding = 16
+    const gap = 14
+
+    const instruction = this.add.text(0, centerY, TARGET_INSTRUCTION, {
+      fontSize: `${instructionSize}px`,
+      color: '#000000',
+      fontStyle: 'bold'
+    }).setOrigin(0, 0.5)
+
+    this.targetText = this.add.text(0, centerY, '', {
+      fontSize: `${panelFontSize}px`,
+      color: '#000000',
+      fontStyle: 'bold',
+      backgroundColor: '#FFEB3B',
+      padding: { x: 8, y: 4 }
+    }).setOrigin(0, 0.5)
+
+    // Reserve room for the widest possible target so the panel does not resize between rounds
+    this.targetText.setText('20')
+    const targetSlotWidth = this.targetText.width
+    const panelWidth = padding + instruction.width + gap + targetSlotWidth + padding
+    const panelHeight = Math.min(controlRowHeight - 8, Math.max(instruction.height, this.targetText.height) + 8)
+    const panelCenterX = Math.max(panelWidth / 2 + 10, Math.min(this.scale.width / 2, freeRight - panelWidth / 2))
+    const panelLeft = panelCenterX - panelWidth / 2
+
+    const background = this.add.graphics()
+    background.fillStyle(0xFFFFFF, 0.9)
+    background.fillRoundedRect(panelLeft, centerY - panelHeight / 2, panelWidth, panelHeight, 16)
+    background.lineStyle(3, 0xFF1493, 1)
+    background.strokeRoundedRect(panelLeft, centerY - panelHeight / 2, panelWidth, panelHeight, 16)
+    // Above balloons, the cat and effects so nothing can cover the panel
+    background.setDepth(10)
+
+    instruction.setX(panelLeft + padding).setDepth(11)
+    this.targetText.setX(panelLeft + padding + instruction.width + gap).setDepth(11)
   }
 
   private createSettingsButton() {
@@ -573,11 +652,20 @@ export class GameScene extends Phaser.Scene {
       this.clearTargetJumpCorridor(positions, correctBalloonIndex, balloonWidth, margin, availableWidth)
     }
     
+    const roundKey = this.gameState.round.balloons.map(b => b.id).join(',')
+    if (roundKey !== this.colorRoundKey) {
+      this.colorRoundKey = roundKey
+      this.roundColorOffset = (this.roundColorOffset + 1) % BALLOON_COLORS.length
+    }
+    const showHint = shouldShowHint(this.gameState.round)
+
     this.gameState.round.balloons.forEach((balloon, index) => {
       const { x, y } = positions[index]
+      const color = BALLOON_COLORS[(index + this.roundColorOffset) % BALLOON_COLORS.length]
+      const hasHintOutline = showHint && balloon.isCorrect
 
       const sprite = this.add.graphics()
-      this.drawBalloon(sprite, 0, 0, balloon.isCorrect, balloonWidth, balloonHeight)
+      this.drawBalloon(sprite, color, balloonWidth, balloonHeight, hasHintOutline)
       sprite.setPosition(x, y)
       sprite.setInteractive(
         new Phaser.Geom.Ellipse(0, 0, balloonWidth, balloonHeight),
@@ -598,6 +686,11 @@ export class GameScene extends Phaser.Scene {
         text,
         x,
         y,
+        spawnY: y,
+        color,
+        width: balloonWidth,
+        height: balloonHeight,
+        hasHintOutline,
         isCorrect: balloon.isCorrect,
         isBouncing: false,
         isPopping: false
@@ -665,13 +758,18 @@ export class GameScene extends Phaser.Scene {
     })
   }
 
-  private drawBalloon(graphics: Phaser.GameObjects.Graphics, x: number, y: number, isCorrect: boolean, width: number, height: number) {
-    const colors = [0xFF6B6B, 0xFFD93D, 0x6BCB77, 0x4D96FF, 0xA78BFA]
-    const color = colors[Math.floor(Math.random() * colors.length)]
-    
+  private drawBalloon(graphics: Phaser.GameObjects.Graphics, color: number, width: number, height: number, hintOutline: boolean) {
+    const x = 0
+    const y = 0
+    graphics.clear()
     graphics.fillStyle(color, 0.9)
     graphics.fillEllipse(x, y, width, height)
-    graphics.lineStyle(3, 0x000000, 0.4)
+    if (hintOutline) {
+      // Constant hint contour on the balloon edge, outside the formula text
+      graphics.lineStyle(6, HINT_OUTLINE_COLOR, 1)
+    } else {
+      graphics.lineStyle(3, 0x000000, 0.4)
+    }
     graphics.strokeEllipse(x, y, width, height)
     
     graphics.fillStyle(0xFFFFFF, 0.3)
@@ -707,6 +805,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private jumpToBalloon(balloonId: string) {
+    // Balloons keep descending between rounds, so size the jump to where they are now
+    this.currentJumpHeight = this.calculateJumpHeight()
     this.catIsJumping = true
     this.catJumpStartY = this.catY
     this.catJumpTime = 0
@@ -722,28 +822,6 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private handleCorrectBalloon(balloonId: string) {
-    const balloon = this.balloonSprites.find(b => b.id === balloonId)
-    if (balloon) {
-      balloon.isPopping = true
-      balloon.popStartTime = this.time.now
-      this.playSound('pop')
-    }
-    
-    this.showFeedback(getPraiseMessage(this.praiseIndex))
-    this.praiseIndex++
-
-    this.gameState = addStar(this.gameState)
-
-    if (isLevelComplete(this.gameState)) {
-      this.showLevelComplete()
-    } else {
-      this.gameState.round = handleCorrectPop(this.gameState.round, this.gameState.settings)
-      this.createBalloons()
-      this.updateUI()
-    }
-  }
-
   private handleWrongBalloon(balloonId: string) {
     const balloon = this.balloonSprites.find(b => b.id === balloonId)
     if (balloon) {
@@ -753,9 +831,19 @@ export class GameScene extends Phaser.Scene {
     }
     
     this.playSound('meow')
-    this.showFeedback(WRONG_ANSWER_MESSAGE)
+    this.showFeedbackIcon('wrong')
     this.gameState.round = handleWrongAttempt(this.gameState.round)
+    this.applyHintOutline()
     this.updateUI()
+  }
+
+  private applyHintOutline() {
+    if (!shouldShowHint(this.gameState.round)) return
+    for (const bs of this.balloonSprites) {
+      if (!bs.isCorrect || bs.hasHintOutline) continue
+      bs.hasHintOutline = true
+      this.drawBalloon(bs.sprite, bs.color, bs.width, bs.height, true)
+    }
   }
 
   private playSound(soundName: string) {
@@ -821,17 +909,49 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private showFeedback(message: string) {
-    this.feedbackText.setText(message)
-    this.feedbackText.setVisible(true)
-    
-    this.time.delayedCall(1500, () => {
-      this.feedbackText.setVisible(false)
-    })
+  /**
+   * Feedback zone: bottom-left strip under the cat, clear of the top panel and of the
+   * balloons, which return to the top before reaching the cat. The icon is a DOM element so
+   * it carries an accessible name without showing it as text. One icon at a time.
+   */
+  private showFeedbackIcon(kind: 'correct' | 'wrong') {
+    this.clearFeedbackIcon()
+    const canvas = this.game.canvas
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const scale = rect.width / this.scale.width
+    const hudBottomMargin = Math.max(80, this.targetFontSize + 40)
+    const size = Math.max(64, Math.min(80, hudBottomMargin - 16))
+    const top = this.scale.height - hudBottomMargin + (hudBottomMargin - size) / 2
+
+    const icon = document.createElement('div')
+    icon.setAttribute('role', 'img')
+    icon.setAttribute('aria-label', kind === 'correct' ? CORRECT_ANSWER_LABEL : WRONG_ANSWER_MESSAGE)
+    icon.setAttribute('data-testid', kind === 'correct' ? 'feedback-cup' : 'feedback-red-x')
+    icon.innerHTML = kind === 'correct' ? CUP_SVG : RED_X_SVG
+    icon.style.cssText = `
+      position: fixed;
+      left: ${rect.left + 16 * scale}px;
+      top: ${rect.top + top * scale}px;
+      width: ${size * scale}px;
+      height: ${size * scale}px;
+      pointer-events: none;
+      z-index: 8000;
+    `
+    document.body.appendChild(icon)
+    this.feedbackIcon = icon
+  }
+
+  private clearFeedbackIcon() {
+    if (this.feedbackIcon) {
+      this.feedbackIcon.remove()
+      this.feedbackIcon = null
+    }
   }
 
   private showLevelComplete() {
     const stars = this.gameState.stars
+    this.clearFeedbackIcon()
     this.levelEndText = `${LEVEL_COMPLETE_TITLE} ${LEVEL_COMPLETE_MESSAGE(stars)}`
     this.playSound('level-complete')
     
@@ -892,6 +1012,7 @@ export class GameScene extends Phaser.Scene {
     
     const nearestBalloon = this.findNearestBalloon()
     if (nearestBalloon) {
+      this.clearFeedbackIcon()
       this.catTargetX = nearestBalloon.x
       this.pendingJumpBalloonId = nearestBalloon.id
     }
@@ -958,13 +1079,14 @@ export class GameScene extends Phaser.Scene {
               this.popAnimationStartTime = time
               this.playSound('pop')
             }
-            this.showFeedback(getPraiseMessage(this.praiseIndex))
-            this.praiseIndex++
+            this.showFeedbackIcon('correct')
+            this.happyUntil = time + 1200
           }
         }
       } else {
         this.catIsJumping = false
         this.catY = this.catJumpStartY
+        this.landingStartTime = time
         this.drawCat(this.cat, this.catX, this.catY)
         // Record landing frame time if we're in an action
         if (this.actionLocked && this.landingFrameTime === 0) {
@@ -975,6 +1097,7 @@ export class GameScene extends Phaser.Scene {
     
     // Track if popping balloon finished rendering during balloon loop
     let poppingBalloonFinishedRendering = false
+    let balloonsReachedBottom = false
     
     this.balloonSprites.forEach(bs => {
       if (bs.isBouncing && bs.bounceStartTime) {
@@ -1011,24 +1134,21 @@ export class GameScene extends Phaser.Scene {
           bs.text.setPosition(bs.x, bs.y)
         }
 
-        if (shouldShowHint(this.gameState.round) && bs.isCorrect) {
-          bs.sprite.alpha = 0.7 + Math.sin(time * 0.005) * 0.3
-        } else {
-          bs.sprite.alpha = 1
-        }
-
         if (!this.catIsJumping && this.popAnimationStartTime === 0 && !this.pendingJumpBalloonId) {
+          // Bottom of the play field: the cat's ear tips at rest, independent of jump height
           const catEarsTop = this.catJumpStartY - 40
-          const catTopDuringJump = catEarsTop - this.currentJumpHeight
-          const balloonRadius = bs.sprite.input ? (bs.sprite.input.hitArea as Phaser.Geom.Ellipse).height / 2 : 50
           const resetMargin = 20
-          if (bs.y + balloonRadius > catTopDuringJump - resetMargin) {
-            this.gameState.round = resetBalloons(this.gameState.round)
-            this.createBalloons()
+          if (bs.y + bs.height / 2 > catEarsTop - resetMargin) {
+            balloonsReachedBottom = true
           }
         }
       }
     })
+
+    if (balloonsReachedBottom) {
+      this.gameState.round = resetBalloons(this.gameState.round)
+      this.returnBalloonsToTop()
+    }
     
     // After balloon rendering, check if popping balloon finished and proceed with new round atomically
     // Only process if landing has been active for at least one frame (time > landingFrameTime)
@@ -1068,7 +1188,17 @@ export class GameScene extends Phaser.Scene {
         this.landingFrameTime = 0
       }
     }
-    
+
+    this.drawCat(this.cat, this.catX, this.catY)
+  }
+
+  /** К6: same balloons, sprites and colours move back up to where the round started */
+  private returnBalloonsToTop() {
+    for (const bs of this.balloonSprites) {
+      bs.y = bs.spawnY
+      bs.sprite.setPosition(bs.x, bs.y)
+      bs.text.setPosition(bs.x, bs.y)
+    }
   }
 
   private toggleMute() {
@@ -1179,6 +1309,7 @@ export class GameScene extends Phaser.Scene {
     // Lock action and start movement
     this.actionLocked = true
     this.actionTargetBalloonId = balloonId
+    this.clearFeedbackIcon()
     
     const balloonCenterX = balloon.x
     this.catTargetX = balloonCenterX

@@ -4,18 +4,24 @@
  */
 
 /**
- * Praise messages shown after correct answers (rotating)
+ * Visible praise after a correct answer. The spec replaced praise text with one cup icon.
  */
-export const PRAISE_MESSAGES = [
-  'Браво!',
-  'Супер!',
-  'Точно така!',
-] as const
+export const PRAISE_MESSAGES: readonly string[] = []
 
 /**
- * Feedback message for wrong answer
+ * Accessible name of the cup icon after a correct answer (never shown as text)
  */
-export const WRONG_ANSWER_MESSAGE = 'Опа! Опитай пак!'
+export const CORRECT_ANSWER_LABEL = 'Вярно'
+
+/**
+ * Accessible name of the red X icon after a wrong answer (never shown as text)
+ */
+export const WRONG_ANSWER_MESSAGE = 'Грешно'
+
+/**
+ * Top panel instruction shown next to the target number
+ */
+export const TARGET_INSTRUCTION = 'Намери сметката за'
 
 /**
  * Level completion messages
@@ -28,10 +34,3 @@ export const LEVEL_COMPLETE_MESSAGE = (stars: number) => `Събра ${stars} з
  */
 export const BUTTON_PLAY_AGAIN = 'Още веднъж'
 export const BUTTON_TO_MENU = 'Към менюто'
-
-/**
- * Get a rotating praise message
- */
-export function getPraiseMessage(index: number): string {
-  return PRAISE_MESSAGES[index % PRAISE_MESSAGES.length]
-}
