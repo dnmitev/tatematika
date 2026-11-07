@@ -475,20 +475,7 @@ export class GameScene extends Phaser.Scene {
       // Ensure minimum top margin for safe zones
       const minTopMargin = 20
       const maxHeightWithMinMargin = availableHeight - 2 * minTopMargin
-      
-      // Additional constraint: bottom row balloon must not intersect cat at jump start
-      // Same math as Count 5: bottom = hudTopSpace + minTopMargin + 2*balloonHeight + margin
-      // Balance between cat clearance and layout spacing
-      const safetyMargin = 40
-      const floatBuffer = 110  // Balanced buffer for cat clearance
-      const catEarsTop = this.scale.height - hudBottomMargin - 80
-      const maxBalloonHeightForCatClearance = 
-        (catEarsTop - hudTopSpace - minTopMargin - margin - safetyMargin - floatBuffer) / 2
-      
-      const maxBalloonHeight = Math.min(
-        (maxHeightWithMinMargin - margin) / 2,
-        maxBalloonHeightForCatClearance
-      )
+      const maxBalloonHeight = (maxHeightWithMinMargin - margin) / 2
       if (balloonHeight > maxBalloonHeight) {
         balloonHeight = Math.max(minTarget, maxBalloonHeight)
         // Re-apply desktop proportions after height adjustment
@@ -532,28 +519,7 @@ export class GameScene extends Phaser.Scene {
       const minTopMargin = 20
       const maxHeightWithMinMargin = availableHeight - 2 * minTopMargin
       const rows = 2
-      
-      // Additional constraint: bottom row balloon must not intersect cat at jump start
-      // Worst case: topMargin = minTopMargin (balloons positioned highest/lowest)
-      //   y1 = hudTopSpace + minTopMargin + balloonHeight/2
-      //   y2 = y1 + balloonHeight + margin  
-      //   bottom = y2 + balloonHeight/2 = hudTopSpace + minTopMargin + 2*balloonHeight + margin
-      // Cat ears top = scale.height - hudBottomMargin - 80
-      // Balance between cat clearance and layout spacing
-      // Clearance requirement:
-      //   hudTopSpace + minTopMargin + 2*balloonHeight + margin + safetyMargin + floatBuffer <= catEarsTop
-      // Solving:
-      //   balloonHeight <= (catEarsTop - hudTopSpace - minTopMargin - margin - safetyMargin - floatBuffer) / 2
-      const safetyMargin = 40
-      const floatBuffer = 110  // Balanced buffer for cat clearance
-      const catEarsTop = this.scale.height - hudBottomMargin - 80
-      const maxBalloonHeightForCatClearance = 
-        (catEarsTop - hudTopSpace - minTopMargin - margin - safetyMargin - floatBuffer) / 2
-      
-      const maxBalloonHeight = Math.min(
-        (maxHeightWithMinMargin - margin) / rows,
-        maxBalloonHeightForCatClearance
-      )
+      const maxBalloonHeight = (maxHeightWithMinMargin - margin) / rows
       if (balloonHeight > maxBalloonHeight) {
         balloonHeight = Math.max(minTarget, maxBalloonHeight)
         // Re-apply desktop proportions after height adjustment
@@ -674,29 +640,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   private jumpToBalloon(balloonId: string) {
-    // Pre-jump safety check: ensure no non-target balloons intersect cat at start position
-    const catEarsTop = this.catY - 40
-    const catBottom = this.catY + 22.5
-    const resetMargin = 70  // Very large margin to account for all timing/measurement variance
-    const bounceBuffer = 12  // Account for balloon bouncing effect (up to 10px + margin)
-    
-    for (const bs of this.balloonSprites) {
-      if (bs.id === balloonId || !bs.sprite || !bs.sprite.input) continue
-      
-      const balloonRadius = (bs.sprite.input.hitArea as Phaser.Geom.Ellipse).height / 2
-      // Account for bouncing: visual position can be up to 10px below logical position
-      const balloonTop = bs.y - balloonRadius - bounceBuffer
-      const balloonBottom = bs.y + balloonRadius + bounceBuffer
-      
-      // Check if non-target balloon intersects cat start position
-      if (!(balloonBottom < catEarsTop - resetMargin || balloonTop > catBottom + resetMargin)) {
-        // Reset and abort this jump attempt
-        this.gameState.round = resetBalloons(this.gameState.round)
-        this.createBalloons()
-        return
-      }
-    }
-    
     this.catIsJumping = true
     this.catJumpStartY = this.catY
     this.catJumpTime = 0
@@ -1011,28 +954,8 @@ export class GameScene extends Phaser.Scene {
           const catEarsTop = this.catJumpStartY - 40
           const catTopDuringJump = catEarsTop - this.currentJumpHeight
           const balloonRadius = bs.sprite.input ? (bs.sprite.input.hitArea as Phaser.Geom.Ellipse).height / 2 : 50
-          const resetMargin = 70  // Very large margin to prevent any near-misses
-          let needsReset = false
-          
-          // Check clearance at jump apex
+          const resetMargin = 20
           if (bs.y + balloonRadius > catTopDuringJump - resetMargin) {
-            needsReset = true
-          }
-          
-          // Additional check: non-target balloons must not intersect cat at starting position
-          if (!bs.isCorrect) {
-            const catTop = catEarsTop
-            const catBottom = this.catJumpStartY + 22.5 // Cat body extends ~22.5px below center
-            const bounceBuffer = 12  // Account for balloon bouncing effect
-            const balloonTop = bs.y - balloonRadius - bounceBuffer
-            const balloonBottom = bs.y + balloonRadius + bounceBuffer
-            
-            if (!(balloonBottom < catTop - resetMargin || balloonTop > catBottom + resetMargin)) {
-              needsReset = true
-            }
-          }
-          
-          if (needsReset) {
             this.gameState.round = resetBalloons(this.gameState.round)
             this.createBalloons()
           }
