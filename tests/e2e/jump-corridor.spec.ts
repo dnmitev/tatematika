@@ -245,15 +245,21 @@ async function checkJumpCorridor(page: any, viewport: string, count: number, rou
       }
     }
     
-    expect(violations, violations.join('\n')).toEqual([])
-    
-    // Wait for jump to complete and new round to start (new balloon ID set)
+    // Wait for jump to complete
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+      return !jumpState.isJumping
+    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    
+    // Wait for new round to start (new balloon ID set or star count increase)
+    await expect.poll(async () => {
       const newState = await page.evaluate(() => window.__tatematika!.getGameState())
       const newBalloonIds = newState.balloons.map((b: any) => b.id).sort()
-      return !jumpState.isJumping && JSON.stringify(newBalloonIds) !== JSON.stringify(initialBalloonIds)
+      return newState.stars > state.stars || JSON.stringify(newBalloonIds) !== JSON.stringify(initialBalloonIds)
     }, { timeout: 5000, intervals: [50] }).toBe(true)
+    
+    // Assert violations after round completes (red on violations, not timeout)
+    expect(violations, violations.join('\n')).toEqual([])
   }
 }
 

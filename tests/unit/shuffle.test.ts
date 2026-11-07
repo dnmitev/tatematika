@@ -108,4 +108,32 @@ describe('Balloon shuffle distribution', () => {
     // Should not be slot 0 in every round
     expect(slotCounts[0], 'Correct balloon should not always be in slot 0').toBeLessThan(rounds)
   })
+
+  it('K17: 3 balloons, 100 rounds, every position at least once, not constant', () => {
+    const count = 3
+    const rounds = 100
+    const rng = new SeededRandom(42)
+    const slotCounts = new Array(count).fill(0)
+    const positions: number[] = []
+    
+    for (let i = 0; i < rounds; i++) {
+      const target = 10
+      const formulas = generateRoundFormulas(target, count, 20, 'both', rng)
+      
+      const correctIndex = formulas.findIndex(f => f.result === target)
+      if (correctIndex >= 0) {
+        slotCounts[correctIndex]++
+        positions.push(correctIndex)
+      }
+    }
+    
+    // Every one of the 3 positions must be used at least once
+    expect(slotCounts[0], 'Position 0 (left) should be used at least once').toBeGreaterThan(0)
+    expect(slotCounts[1], 'Position 1 (center) should be used at least once').toBeGreaterThan(0)
+    expect(slotCounts[2], 'Position 2 (right) should be used at least once').toBeGreaterThan(0)
+    
+    // Not constant: position should vary (not all rounds in same position)
+    const uniquePositions = new Set(positions)
+    expect(uniquePositions.size, 'Position should not be constant across all rounds').toBeGreaterThan(1)
+  })
 })
