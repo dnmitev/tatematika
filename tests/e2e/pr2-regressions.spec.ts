@@ -328,33 +328,80 @@ test.describe('PR #2 Review Regressions', () => {
       
       const BaseProto = window.BaseAudioContext?.prototype || window.AudioContext?.prototype;
       
-      if (BaseProto) {
-        const originalClose = BaseProto.close;
+      // Patch close/suspend on AudioContext.prototype (they live there, not on BaseAudioContext)
+      const AudioCtxProto = window.AudioContext?.prototype;
+      const WebkitCtxProto = window.webkitAudioContext?.prototype;
+      
+      if (AudioCtxProto) {
+        const originalClose = AudioCtxProto.close;
         if (originalClose) {
-          BaseProto.close = function() {
+          AudioCtxProto.close = function() {
+            const perfTime = performance.now();
+            const ctxTime = this.currentTime;
             for (const osc of oscillators) {
               if (osc.ctx === this && osc.ctxClosedAt === 0) {
-                osc.ctxClosedAt = this.currentTime;
-                osc.ctxClosePerfTime = performance.now();
+                osc.ctxClosedAt = ctxTime;
+                osc.ctxClosePerfTime = perfTime;
               }
             }
-            return originalClose.apply(this, arguments);
+            const result = originalClose.apply(this, arguments);
+            return result;
           };
         }
         
-        const originalSuspend = BaseProto.suspend;
+        const originalSuspend = AudioCtxProto.suspend;
         if (originalSuspend) {
-          BaseProto.suspend = function() {
+          AudioCtxProto.suspend = function() {
+            const perfTime = performance.now();
+            const ctxTime = this.currentTime;
             for (const osc of oscillators) {
               if (osc.ctx === this && osc.ctxSuspendedAt === 0) {
-                osc.ctxSuspendedAt = this.currentTime;
-                osc.ctxSuspendPerfTime = performance.now();
+                osc.ctxSuspendedAt = ctxTime;
+                osc.ctxSuspendPerfTime = perfTime;
               }
             }
-            return originalSuspend.apply(this, arguments);
+            const result = originalSuspend.apply(this, arguments);
+            return result;
+          };
+        }
+      }
+      
+      if (WebkitCtxProto) {
+        const originalClose = WebkitCtxProto.close;
+        if (originalClose) {
+          WebkitCtxProto.close = function() {
+            const perfTime = performance.now();
+            const ctxTime = this.currentTime;
+            for (const osc of oscillators) {
+              if (osc.ctx === this && osc.ctxClosedAt === 0) {
+                osc.ctxClosedAt = ctxTime;
+                osc.ctxClosePerfTime = perfTime;
+              }
+            }
+            const result = originalClose.apply(this, arguments);
+            return result;
           };
         }
         
+        const originalSuspend = WebkitCtxProto.suspend;
+        if (originalSuspend) {
+          WebkitCtxProto.suspend = function() {
+            const perfTime = performance.now();
+            const ctxTime = this.currentTime;
+            for (const osc of oscillators) {
+              if (osc.ctx === this && osc.ctxSuspendedAt === 0) {
+                osc.ctxSuspendedAt = ctxTime;
+                osc.ctxSuspendPerfTime = perfTime;
+              }
+            }
+            const result = originalSuspend.apply(this, arguments);
+            return result;
+          };
+        }
+      }
+      
+      // Patch createOscillator on BaseAudioContext (or AudioContext fallback)
+      if (BaseProto) {
         const originalCreateOscillator = BaseProto.createOscillator;
         if (originalCreateOscillator) {
           BaseProto.createOscillator = function() {
@@ -522,12 +569,17 @@ test.describe('PR #2 Review Regressions', () => {
     // Self-test to prove the instrumentation can detect silencing
     // Uses same init script and analysis function as main K10 test
     
-    await page.addInitScript(audioInstrumentationCode + `
-      window.__audioInstrumentation = setupAudioInstrumentation();
-      window.__analyzeMuteEffectiveness = analyzeMuteEffectiveness;
+    await page.goto('about:blank')
+    
+    // Inject instrumentation directly
+    await page.evaluate(`
+      (function() {
+        ${audioInstrumentationCode}
+        window.__audioInstrumentation = setupAudioInstrumentation();
+        window.__analyzeMuteEffectiveness = analyzeMuteEffectiveness;
+      })();
     `)
     
-    await page.goto('about:blank')
     await page.waitForTimeout(10)
     
     // Test case 1: stop() silences
