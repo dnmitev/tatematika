@@ -129,12 +129,12 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
       return jumpState.isJumping
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
-    // Wait for new round (balloon ID set changes and cat idle)
+    // Wait for new round (target value changes and cat idle)
+    // Note: Can't use balloon IDs with seeded PRNG since IDs include Math.random()
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       const newState = await page.evaluate(() => window.__tatematika!.getGameState())
-      const newBalloonIds = newState.balloons.map((b: any) => b.id).sort()
-      return !jumpState.isJumping && JSON.stringify(newBalloonIds) !== JSON.stringify(initialBalloonIds)
+      return !jumpState.isJumping && newState.round.target !== state.round.target
     }, { timeout: 10000, intervals: [50] }).toBe(true)
   }
   
