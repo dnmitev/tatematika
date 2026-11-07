@@ -47,6 +47,9 @@ export class GameScene extends Phaser.Scene {
   private jumpContactMade: boolean = false
   private popAnimationStartTime: number = 0
   private popAnimationCompleted: boolean = false
+  private actionLocked: boolean = false
+  private actionTargetBalloonId: string | null = null
+  private wrongBalloonBounceCompleted: boolean = false
   private activeAudioContexts: AudioContext[] = []
   private activeOscillators: { oscillator: OscillatorNode, gainNode: GainNode, context: AudioContext }[] = []
   
@@ -634,7 +637,7 @@ export class GameScene extends Phaser.Scene {
     const isCorrect = checkBalloon(this.gameState.round, balloonId)
     
     if (!isCorrect) {
-      // Only handle visual/audio feedback, wrongAttempts already incremented in clickBalloon
+      // Handle visual/audio feedback for wrong balloon
       const balloon = this.balloonSprites.find(b => b.id === balloonId)
       if (balloon) {
         balloon.isBouncing = true
@@ -775,6 +778,9 @@ export class GameScene extends Phaser.Scene {
     this.jumpContactMade = false
     this.popAnimationStartTime = 0
     this.popAnimationCompleted = false
+    this.actionLocked = false
+    this.actionTargetBalloonId = null
+    this.wrongBalloonBounceCompleted = false
     this.catTargetX = this.catX
     this.catY = this.catJumpStartY
     this.drawCat(this.cat, this.catX, this.catY)
@@ -790,6 +796,9 @@ export class GameScene extends Phaser.Scene {
 
   private handleKeyDown(event: KeyboardEvent) {
     if (this.settingsUI && this.settingsUI.isOpen()) return
+    
+    // K12-K16: Full input ignore during action lifecycle
+    if (this.actionLocked) return
     
     if (event.key === 'ArrowLeft') {
       this.moveCat(-1)
@@ -901,6 +910,10 @@ export class GameScene extends Phaser.Scene {
           bs.isBouncing = false
           bs.sprite.setY(bs.y)
           bs.text.setY(bs.y)
+          // Check if this is the target balloon that finished bouncing
+          if (bs.id === this.jumpTargetBalloonId && this.actionLocked && !this.jumpContactMade) {
+            this.wrongBalloonBounceCompleted = true
+          }
         }
       } else if (bs.isPopping && bs.popStartTime) {
         const elapsed = time - bs.popStartTime
@@ -960,6 +973,23 @@ export class GameScene extends Phaser.Scene {
         this.createBalloons()
         this.updateUI()
       }
+      
+      // Unlock action after correct balloon evaluation
+      this.actionLocked = false
+      this.actionTargetBalloonId = null
+    }
+    
+    // Handle wrong balloon bounce completion
+    if (this.wrongBalloonBounceCompleted && !this.catIsJumping && this.actionLocked) {
+      this.gameState.round = handleWrongAttempt(this.gameState.round)
+      this.updateUI()
+      
+      // Unlock action after wrong balloon evaluation
+      this.actionLocked = false
+      this.actionTargetBalloonId = null
+      this.jumpTargetBalloonId = null
+      this.jumpContactMade = false
+      this.wrongBalloonBounceCompleted = false
     }
   }
 
@@ -1028,6 +1058,9 @@ export class GameScene extends Phaser.Scene {
     this.jumpContactMade = false
     this.popAnimationStartTime = 0
     this.popAnimationCompleted = false
+    this.actionLocked = false
+    this.actionTargetBalloonId = null
+    this.wrongBalloonBounceCompleted = false
     this.catY = this.catJumpStartY
     
     this.gameState.round = createRound(settings)
@@ -1060,39 +1093,24 @@ export class GameScene extends Phaser.Scene {
     const balloon = this.balloonSprites.find(b => b.id === balloonId)
     if (!balloon) return
     
-    if (this.catIsJumping) {
-      const isCorrect = checkBalloon(this.gameState.round, balloonId)
-      if (!isCorrect) {
-        this.gameState.round = handleWrongAttempt(this.gameState.round)
-        this.updateUI()
-      }
+    // K12-K16: Full input ignore during action lifecycle (walk, jump, landing)
+    if (this.actionLocked) {
       return
     }
     
-    // If already walking to a balloon, treat additional click as input during action
-    if (this.pendingJumpBalloonId) {
-      const isCorrect = checkBalloon(this.gameState.round, balloonId)
-      if (!isCorrect) {
-        this.gameState.round = handleWrongAttempt(this.gameState.round)
-        this.updateUI()
-      }
-      return
-    }
+    // Lock action and start movement
+    this.actionLocked = true
+    this.actionTargetBalloonId = balloonId
     
     const balloonCenterX = balloon.x
     this.catTargetX = balloonCenterX
     this.pendingJumpBalloonId = balloonId
-    
-    // Immediately check if this is a wrong balloon and increment attempts
-    // This ensures rapid clicks on wrong balloons are counted even if animation hasn't started
-    const isCorrect = checkBalloon(this.gameState.round, balloonId)
-    if (!isCorrect) {
-      this.gameState.round = handleWrongAttempt(this.gameState.round)
-      this.updateUI()
-    }
   }
 
   public pressKey(key: 'left' | 'right' | 'space' | 'up') {
+    // K12-K16: Full input ignore during action lifecycle
+    if (this.actionLocked) return
+    
     if (key === 'left') {
       this.moveCat(-1)
     } else if (key === 'right') {
