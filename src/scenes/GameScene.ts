@@ -51,6 +51,7 @@ export class GameScene extends Phaser.Scene {
   private actionTargetBalloonId: string | null = null
   private wrongBalloonBounceCompleted: boolean = false
   private jumpJustCompleted: boolean = false
+  private walkJustStarted: boolean = false
   private activeAudioContexts: AudioContext[] = []
   private activeOscillators: { oscillator: OscillatorNode, gainNode: GainNode, context: AudioContext }[] = []
   
@@ -783,6 +784,7 @@ export class GameScene extends Phaser.Scene {
     this.actionTargetBalloonId = null
     this.wrongBalloonBounceCompleted = false
     this.jumpJustCompleted = false
+    this.walkJustStarted = false
     this.catTargetX = this.catX
     this.catY = this.catJumpStartY
     this.drawCat(this.cat, this.catX, this.catY)
@@ -842,6 +844,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number) {
+    // Delay jump initiation by one frame to ensure walk phase is detectable
+    const skipJumpThisFrame = this.walkJustStarted
+    
     if (!this.catIsJumping && Math.abs(this.catX - this.catTargetX) > 2) {
       const distance = this.catTargetX - this.catX
       const moveSpeed = Math.min(Math.abs(distance), 20)
@@ -855,15 +860,20 @@ export class GameScene extends Phaser.Scene {
       }
       this.drawCat(this.cat, this.catX, this.catY)
       
-      if (this.pendingJumpBalloonId && Math.abs(this.catX - this.catTargetX) <= 2) {
+      if (!skipJumpThisFrame && this.pendingJumpBalloonId && Math.abs(this.catX - this.catTargetX) <= 2) {
         const balloonId = this.pendingJumpBalloonId
         this.pendingJumpBalloonId = null
         this.jumpToBalloon(balloonId)
       }
-    } else if (!this.catIsJumping && this.pendingJumpBalloonId) {
+    } else if (!skipJumpThisFrame && !this.catIsJumping && this.pendingJumpBalloonId) {
       const balloonId = this.pendingJumpBalloonId
       this.pendingJumpBalloonId = null
       this.jumpToBalloon(balloonId)
+    }
+    
+    // Clear walk start flag after jump checks
+    if (this.walkJustStarted) {
+      this.walkJustStarted = false
     }
     
     if (this.catIsJumping) {
@@ -896,6 +906,7 @@ export class GameScene extends Phaser.Scene {
         this.catY = this.catJumpStartY
         this.drawCat(this.cat, this.catX, this.catY)
         this.jumpJustCompleted = true
+        console.log(`[jump] Jump completed, popAnimationStartTime=${this.popAnimationStartTime}`)
       }
     }
     
@@ -967,8 +978,14 @@ export class GameScene extends Phaser.Scene {
       this.jumpJustCompleted = false
     }
     
+    // Debug logging for evaluation conditions
+    if (this.popAnimationStartTime > 0 || poppingBalloonFinishedRendering) {
+      console.log(`[eval check] skip=${skipEvaluationThisFrame}, popFinished=${poppingBalloonFinishedRendering}, !jumping=${!this.catIsJumping}, popStarted=${this.popAnimationStartTime > 0}`)
+    }
+    
     // After balloon rendering, check if popping balloon finished and proceed with new round atomically
     if (!skipEvaluationThisFrame && poppingBalloonFinishedRendering && !this.catIsJumping && this.popAnimationStartTime > 0) {
+      console.log(`[eval] Adding star!`)
       this.popAnimationCompleted = true
       this.popAnimationStartTime = 0
       this.jumpTargetBalloonId = null
@@ -1072,6 +1089,7 @@ export class GameScene extends Phaser.Scene {
     this.actionTargetBalloonId = null
     this.wrongBalloonBounceCompleted = false
     this.jumpJustCompleted = false
+    this.walkJustStarted = false
     this.catY = this.catJumpStartY
     
     this.gameState.round = createRound(settings)
@@ -1112,6 +1130,7 @@ export class GameScene extends Phaser.Scene {
     // Lock action and start movement
     this.actionLocked = true
     this.actionTargetBalloonId = balloonId
+    this.walkJustStarted = true
     
     const balloonCenterX = balloon.x
     this.catTargetX = balloonCenterX
