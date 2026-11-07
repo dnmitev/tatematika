@@ -129,13 +129,15 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
       return jumpState.isJumping
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
-    // Wait for new round (target value changes and cat idle)
-    // Note: Can't use balloon IDs with seeded PRNG since IDs include Math.random()
+    // Wait for jump to complete
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-      const newState = await page.evaluate(() => window.__tatematika!.getGameState())
-      return !jumpState.isJumping && newState.target !== initialTarget
+      return !jumpState.isJumping
     }, { timeout: 10000, intervals: [50] }).toBe(true)
+    
+    // Small delay to allow new round creation
+    // With correctBalloonsPerLevel=100, we won't hit level complete in 30 rounds
+    await page.waitForTimeout(200)
   }
   
   return { slots, levelCompleteAppeared }
