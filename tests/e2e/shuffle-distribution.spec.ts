@@ -36,6 +36,31 @@ function getMulberry32Code(seed: number): string {
 
 const CORRECT_PER_LEVEL = 20
 
+/**
+ * Install a fresh Mulberry32 as the round RNG.
+ * Must run before closeSettings(). Settings are persisted in the browser, so a
+ * reload with a different balloon count consumes a different number of global
+ * Math.random calls before the first round. That round is generated inside
+ * closeSettings, and it is the first recorded round.
+ */
+async function installRoundRng(page: any, seed: number): Promise<void> {
+  await page.evaluate((s: number) => {
+    const hook = window.__tatematika!
+    if (typeof hook.setRoundRng !== 'function') {
+      throw new Error('K17 CONTRACT: setRoundRng hook must be implemented')
+    }
+    let state = s
+    const roundRng = () => {
+      state |= 0
+      state = state + 0x6D2B79F5 | 0
+      let t = Math.imul(state ^ state >>> 15, 1 | state)
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t
+      return ((t ^ t >>> 14) >>> 0) / 4294967296
+    }
+    hook.setRoundRng(roundRng)
+  }, seed)
+}
+
 async function setBalloonCount(page: any, count: number) {
   await page.evaluate(() => window.__tatematika!.openSettings())
   
@@ -95,7 +120,7 @@ interface CellPosition {
   col: number
 }
 
-async function playRoundsAndRecordSlots(page: any, count: number, rounds: number, seed?: number): Promise<{ 
+async function playRoundsAndRecordSlots(page: any, count: number, rounds: number): Promise<{ 
   slots: number[], 
   cells: CellPosition[],
   roundTokens: number[]
@@ -103,30 +128,6 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
   const slots: number[] = []
   const cells: CellPosition[] = []
   const roundTokens: number[] = []
-  
-  // Inject seeded RNG for round generation via K17 test hook
-  // This ensures deterministic shuffle by isolating round-generation randomness
-  // from timing-dependent Math.random calls (colors, IDs)
-  if (seed !== undefined) {
-    await page.evaluate((s) => {
-      // Create a dedicated Mulberry32 PRNG for round generation
-      let state = s
-      const roundRng = () => {
-        state |= 0
-        state = state + 0x6D2B79F5 | 0
-        let t = Math.imul(state ^ state >>> 15, 1 | state)
-        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t
-        return ((t ^ t >>> 14) >>> 0) / 4294967296
-      }
-      
-      // Inject via K17 test hook (will be no-op until implemented in src)
-      if (window.__tatematika!.setRoundRng) {
-        window.__tatematika!.setRoundRng(roundRng)
-      }
-      // Note: Global Math.random replacement (in addInitScript) remains as fallback
-      // Once setRoundRng is wired up in src, it will override Math.random for round generation
-    }, seed)
-  }
   
   // Initialize round token counter in the page
   await page.evaluate(() => {
@@ -320,16 +321,18 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       const hasSetRoundRng = await page.evaluate(() => typeof window.__tatematika!.setRoundRng === 'function')
       expect(hasSetRoundRng, 'K17 CONTRACT: setRoundRng hook must be implemented for deterministic shuffle').toBe(true)
       
+      await installRoundRng(page, SEED_A)
       await setBalloonCount(page, count)
-      const result1 = await playRoundsAndRecordSlots(page, count, rounds, SEED_A)
+      const result1 = await playRoundsAndRecordSlots(page, count, rounds)
       
       // Second run: verify determinism with same seed
       await page.addInitScript(getMulberry32Code(SEED_A))
       await page.goto('/')
       await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
       
+      await installRoundRng(page, SEED_A)
       await setBalloonCount(page, count)
-      const result2 = await playRoundsAndRecordSlots(page, count, rounds, SEED_A)
+      const result2 = await playRoundsAndRecordSlots(page, count, rounds)
       
       // Now perform all assertions
       expect(result1.slots.length, 'Should have recorded all rounds in first run').toBe(rounds)
@@ -367,8 +370,9 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       const hasSetRoundRng = await page.evaluate(() => typeof window.__tatematika!.setRoundRng === 'function')
       expect(hasSetRoundRng, 'K17 CONTRACT: setRoundRng hook must be implemented for deterministic shuffle').toBe(true)
       
+      await installRoundRng(page, SEED_B)
       await setBalloonCount(page, count)
-      const result = await playRoundsAndRecordSlots(page, count, rounds, SEED_B)
+      const result = await playRoundsAndRecordSlots(page, count, rounds)
       
       // Now perform all assertions
       expect(result.slots.length, 'Should have recorded all rounds').toBe(rounds)
@@ -401,6 +405,7 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       const hasSetRoundRng = await page.evaluate(() => typeof window.__tatematika!.setRoundRng === 'function')
       expect(hasSetRoundRng, 'K17 CONTRACT: setRoundRng hook must be implemented (shuffle not working without it)').toBe(true)
       
+      await installRoundRng(page, SEED_A)
       await setBalloonCount(page, count)
       const result = await playRoundsAndRecordSlots(page, count, rounds)
       
@@ -451,6 +456,7 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       const hasSetRoundRng = await page.evaluate(() => typeof window.__tatematika!.setRoundRng === 'function')
       expect(hasSetRoundRng, 'K17 CONTRACT: setRoundRng hook must be implemented (shuffle not working without it)').toBe(true)
       
+      await installRoundRng(page, SEED_B)
       await setBalloonCount(page, count)
       const result = await playRoundsAndRecordSlots(page, count, rounds)
       
