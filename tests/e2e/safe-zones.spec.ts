@@ -451,8 +451,12 @@ test.describe('Safe Zones - After Page Reload - 320×568', () => {
   test.use({ viewport: { width: 320, height: 568 } })
   
   test('Count 3: After reload, no balloon overlaps', async ({ page }) => {
-    await page.goto('/?balloonCount=3')
+    await page.goto('/')
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    
+    // Count 3 is default, but explicitly verify BEFORE reload
+    const stateBefore = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(stateBefore.balloons.length).toBe(3)
     
     await page.reload()
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
@@ -463,13 +467,24 @@ test.describe('Safe Zones - After Page Reload - 320×568', () => {
       const correctCount = state.balloons.filter((b: any) => b.isCorrect).length
       return !jumpState.isJumping && correctCount === 1
     }, { timeout: 10000, intervals: [50] }).toBe(true)
+    
+    // Verify count is still 3 AFTER reload
+    const stateAfter = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(stateAfter.balloons.length).toBe(3)
     
     await checkSafeZonesContinuous(page, '320×568', 3, 'after-reload')
   })
   
   test('Count 4: After reload, no balloon overlaps', async ({ page }) => {
-    await page.goto('/?balloonCount=4')
+    await page.goto('/')
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    
+    // Set count to 4 via REAL UI settings (not URL param which app doesn't read)
+    await setBalloonCount(page, 4)
+    
+    // Verify count is 4 BEFORE reload
+    const stateBefore = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(stateBefore.balloons.length).toBe(4)
     
     await page.reload()
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
@@ -480,13 +495,24 @@ test.describe('Safe Zones - After Page Reload - 320×568', () => {
       const correctCount = state.balloons.filter((b: any) => b.isCorrect).length
       return !jumpState.isJumping && correctCount === 1
     }, { timeout: 10000, intervals: [50] }).toBe(true)
+    
+    // Verify count is still 4 AFTER reload (per spec K9)
+    const stateAfter = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(stateAfter.balloons.length).toBe(4)
     
     await checkSafeZonesContinuous(page, '320×568', 4, 'after-reload')
   })
   
   test('Count 5: After reload, no balloon overlaps', async ({ page }) => {
-    await page.goto('/?balloonCount=5')
+    await page.goto('/')
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    
+    // Set count to 5 via REAL UI settings (not URL param which app doesn't read)
+    await setBalloonCount(page, 5)
+    
+    // Verify count is 5 BEFORE reload
+    const stateBefore = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(stateBefore.balloons.length).toBe(5)
     
     await page.reload()
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
@@ -497,6 +523,10 @@ test.describe('Safe Zones - After Page Reload - 320×568', () => {
       const correctCount = state.balloons.filter((b: any) => b.isCorrect).length
       return !jumpState.isJumping && correctCount === 1
     }, { timeout: 10000, intervals: [50] }).toBe(true)
+    
+    // Verify count is still 5 AFTER reload (per spec K9)
+    const stateAfter = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(stateAfter.balloons.length).toBe(5)
     
     await checkSafeZonesContinuous(page, '320×568', 5, 'after-reload')
   })
@@ -579,8 +609,12 @@ test.describe('Safe Zones - After Page Reload - 375×667', () => {
   test.use({ viewport: { width: 375, height: 667 } })
   
   test('Count 3: After reload, no balloon overlaps', async ({ page }) => {
-    await page.goto('/?balloonCount=3')
+    await page.goto('/')
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    
+    // Count 3 is default, but explicitly verify BEFORE reload
+    const stateBefore = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(stateBefore.balloons.length).toBe(3)
     
     await page.reload()
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
@@ -591,13 +625,24 @@ test.describe('Safe Zones - After Page Reload - 375×667', () => {
       const correctCount = state.balloons.filter((b: any) => b.isCorrect).length
       return !jumpState.isJumping && correctCount === 1
     }, { timeout: 10000, intervals: [50] }).toBe(true)
+    
+    // Verify count is still 3 AFTER reload
+    const stateAfter = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(stateAfter.balloons.length).toBe(3)
     
     await checkSafeZonesContinuous(page, '375×667', 3, 'after-reload')
   })
   
   test('Count 4: After reload, no balloon overlaps', async ({ page }) => {
-    await page.goto('/?balloonCount=4')
+    await page.goto('/')
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    
+    // Set count to 4 via REAL UI settings
+    await setBalloonCount(page, 4)
+    
+    // Verify count is 4 BEFORE reload
+    const stateBefore = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(stateBefore.balloons.length).toBe(4)
     
     await page.reload()
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
@@ -608,13 +653,24 @@ test.describe('Safe Zones - After Page Reload - 375×667', () => {
       const correctCount = state.balloons.filter((b: any) => b.isCorrect).length
       return !jumpState.isJumping && correctCount === 1
     }, { timeout: 10000, intervals: [50] }).toBe(true)
+    
+    // Verify count is still 4 AFTER reload (per spec K9)
+    const stateAfter = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(stateAfter.balloons.length).toBe(4)
     
     await checkSafeZonesContinuous(page, '375×667', 4, 'after-reload')
   })
   
   test('Count 5: After reload, no balloon overlaps', async ({ page }) => {
-    await page.goto('/?balloonCount=5')
+    await page.goto('/')
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    
+    // Set count to 5 via REAL UI settings
+    await setBalloonCount(page, 5)
+    
+    // Verify count is 5 BEFORE reload
+    const stateBefore = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(stateBefore.balloons.length).toBe(5)
     
     await page.reload()
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
@@ -625,6 +681,10 @@ test.describe('Safe Zones - After Page Reload - 375×667', () => {
       const correctCount = state.balloons.filter((b: any) => b.isCorrect).length
       return !jumpState.isJumping && correctCount === 1
     }, { timeout: 10000, intervals: [50] }).toBe(true)
+    
+    // Verify count is still 5 AFTER reload (per spec K9)
+    const stateAfter = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(stateAfter.balloons.length).toBe(5)
     
     await checkSafeZonesContinuous(page, '375×667', 5, 'after-reload')
   })
@@ -721,8 +781,12 @@ test.describe('Safe Zones - After Page Reload - 1280×800', () => {
   test.use({ viewport: { width: 1280, height: 800 } })
   
   test('Count 3: After reload, no balloon overlaps', async ({ page }) => {
-    await page.goto('/?balloonCount=3')
+    await page.goto('/')
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    
+    // Count 3 is default, but explicitly verify BEFORE reload
+    const stateBefore = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(stateBefore.balloons.length).toBe(3)
     
     await page.reload()
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
@@ -733,13 +797,24 @@ test.describe('Safe Zones - After Page Reload - 1280×800', () => {
       const correctCount = state.balloons.filter((b: any) => b.isCorrect).length
       return !jumpState.isJumping && correctCount === 1
     }, { timeout: 10000, intervals: [50] }).toBe(true)
+    
+    // Verify count is still 3 AFTER reload
+    const stateAfter = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(stateAfter.balloons.length).toBe(3)
     
     await checkSafeZonesContinuous(page, '1280×800', 3, 'after-reload')
   })
   
   test('Count 4: After reload, no balloon overlaps', async ({ page }) => {
-    await page.goto('/?balloonCount=4')
+    await page.goto('/')
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    
+    // Set count to 4 via REAL UI settings
+    await setBalloonCount(page, 4)
+    
+    // Verify count is 4 BEFORE reload
+    const stateBefore = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(stateBefore.balloons.length).toBe(4)
     
     await page.reload()
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
@@ -750,13 +825,24 @@ test.describe('Safe Zones - After Page Reload - 1280×800', () => {
       const correctCount = state.balloons.filter((b: any) => b.isCorrect).length
       return !jumpState.isJumping && correctCount === 1
     }, { timeout: 10000, intervals: [50] }).toBe(true)
+    
+    // Verify count is still 4 AFTER reload (per spec K9)
+    const stateAfter = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(stateAfter.balloons.length).toBe(4)
     
     await checkSafeZonesContinuous(page, '1280×800', 4, 'after-reload')
   })
   
   test('Count 5: After reload, no balloon overlaps', async ({ page }) => {
-    await page.goto('/?balloonCount=5')
+    await page.goto('/')
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    
+    // Set count to 5 via REAL UI settings
+    await setBalloonCount(page, 5)
+    
+    // Verify count is 5 BEFORE reload
+    const stateBefore = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(stateBefore.balloons.length).toBe(5)
     
     await page.reload()
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
@@ -767,6 +853,10 @@ test.describe('Safe Zones - After Page Reload - 1280×800', () => {
       const correctCount = state.balloons.filter((b: any) => b.isCorrect).length
       return !jumpState.isJumping && correctCount === 1
     }, { timeout: 10000, intervals: [50] }).toBe(true)
+    
+    // Verify count is still 5 AFTER reload (per spec K9)
+    const stateAfter = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(stateAfter.balloons.length).toBe(5)
     
     await checkSafeZonesContinuous(page, '1280×800', 5, 'after-reload')
   })
@@ -1204,8 +1294,12 @@ test.describe('Pixel Ground-Truth Validation', () => {
   
   test('320×568 count 3: CommandBuffer bounds match painted pixels', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 568 })
-    await page.goto('/?balloonCount=3')
+    await page.goto('/')
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    
+    // Count 3 is default, verify it
+    const state = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(state.balloons.length).toBe(3)
     
     // Wait for game to be stable AND all balloons to be fully visible
     await page.waitForTimeout(500)
@@ -1559,8 +1653,15 @@ test.describe('Pixel Ground-Truth Validation', () => {
   })
   test('1280×800 count 5: CommandBuffer bounds match painted pixels', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
-    await page.goto('/?balloonCount=5')
+    await page.goto('/')
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    
+    // Set count to 5 via REAL UI settings
+    await setBalloonCount(page, 5)
+    
+    // Verify count is 5
+    const state = await page.evaluate(() => window.__tatematika!.getGameState())
+    expect(state.balloons.length).toBe(5)
     
     // Wait for game to be stable AND all balloons to be fully visible
     await page.waitForTimeout(500)
