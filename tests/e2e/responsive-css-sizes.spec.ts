@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS } from './test-timeouts'
 import { popCorrectBalloonAndWait, getGameScaleAndRect } from './helpers'
 
 /**
@@ -18,7 +19,7 @@ test.describe('Responsive CSS Sizes - Mobile 375×667 @mobile', () => {
 
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
 
   test('Formula digits must be at least 32 CSS pixels on mobile (spec §7)', async ({ page }) => {
@@ -84,7 +85,7 @@ test.describe('Responsive CSS Sizes - Mobile 375×667 @mobile', () => {
     })
     
     await page.reload()
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
     
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
     expect(state.balloons).toHaveLength(5)
@@ -127,7 +128,7 @@ test.describe('Responsive CSS Sizes - Mobile 375×667 @mobile', () => {
     })
     
     await page.reload()
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
     
     // Complete level (5 stars) using the shared helper that waits for cat readiness
     for (let i = 0; i < 5; i++) {
@@ -138,7 +139,7 @@ test.describe('Responsive CSS Sizes - Mobile 375×667 @mobile', () => {
     await expect.poll(async () => {
       const levelText = await page.evaluate(() => window.__tatematika!.getLevelEndText())
       return levelText !== null && levelText.includes('Ти успя')
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     // Check "Още веднъж" button
     const playAgainButton = page.locator('[data-testid="button-play-again"]')
@@ -163,7 +164,7 @@ test.describe('Responsive CSS Sizes - Mobile 375×667 @mobile', () => {
     })
     
     await page.reload()
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
     
     const { scale } = await getGameScaleAndRect(page)
     
@@ -180,7 +181,7 @@ test.describe('Responsive CSS Sizes - Desktop 1920×1080', () => {
 
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
 
   test('Formula digits must be at least 32 CSS pixels on desktop (spec §7)', async ({ page }) => {
@@ -240,7 +241,7 @@ test.describe('Responsive CSS Sizes - Desktop 1920×1080', () => {
     })
     
     await page.reload()
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
     
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
     expect(state.balloons).toHaveLength(5)
@@ -283,7 +284,7 @@ test.describe('Responsive CSS Sizes - Scale Factor Edge Cases', () => {
     await page.setViewportSize({ width: 320, height: 568 })
     
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
     
     const { scale } = await getGameScaleAndRect(page)
     
@@ -309,7 +310,7 @@ test.describe('Responsive CSS Sizes - Scale Factor Edge Cases', () => {
     await page.setViewportSize({ width: 375, height: 667 })
     
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
     
     const { scale } = await getGameScaleAndRect(page)
     

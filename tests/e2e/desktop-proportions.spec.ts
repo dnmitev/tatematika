@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS } from './test-timeouts'
 
 /**
  * Desktop Balloon Proportions Tests
@@ -167,7 +168,7 @@ for (const vp of viewports) {
     
     test.beforeEach(async ({ page }) => {
       await page.goto('/')
-      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
     })
     
     for (const count of [3, 4, 5]) {
@@ -178,7 +179,7 @@ for (const vp of viewports) {
         await expect.poll(async () => {
           const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
           return !jumpState.isJumping
-        }, { timeout: 5000, intervals: [50] }).toBe(true)
+        }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
         
         const measurements = await measureBalloons(page)
         

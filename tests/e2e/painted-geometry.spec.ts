@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { INIT_TIMEOUT_MS } from './test-timeouts'
 
 /**
  * Painted Balloon Geometry Tests - Exact commandBuffer Parsing
@@ -205,7 +206,7 @@ test.describe('Exact Geometry - Synthetic Validation', () => {
   
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
 
   test('Synthetic test: validate commandBuffer measurement with known ellipse', async ({ page }) => {
@@ -428,7 +429,7 @@ test.describe('Layout and Formula - 320×568 @mobile', () => {
   
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
 
   test('Count 3: Layout and formula text', async ({ page }) => {
@@ -449,7 +450,7 @@ test.describe('Layout and Formula - 375×667 @mobile', () => {
   
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
 
   test('Count 3: Layout and formula text', async ({ page }) => {
@@ -470,7 +471,7 @@ test.describe('Layout and Formula - 1280×800', () => {
   
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
 
   test('Count 3: Layout and formula text', async ({ page }) => {

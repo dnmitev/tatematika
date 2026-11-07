@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS } from './test-timeouts'
 import { popCorrectBalloonAndWait, getGameScaleAndRect } from './helpers'
 
 /**
@@ -15,7 +16,7 @@ import { popCorrectBalloonAndWait, getGameScaleAndRect } from './helpers'
 test.describe('PR #2 Review Regressions', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
 
   // ============================================================================
@@ -40,7 +41,7 @@ test.describe('PR #2 Review Regressions', () => {
     
     // Reload
     await page.reload()
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
     
     // Wait for game ready
     await expect.poll(async () => {
@@ -48,7 +49,7 @@ test.describe('PR #2 Review Regressions', () => {
       const state = await page.evaluate(() => window.__tatematika!.getGameState())
       const correctCount = state.balloons.filter((b: any) => b.isCorrect).length
       return !jumpState.isJumping && correctCount === 1
-    }, { timeout: 10000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     // Assert count AFTER reload per spec K9: "настройката се запазва след презареждане"
     const stateAfter = await page.evaluate(() => window.__tatematika!.getGameState())
@@ -74,7 +75,7 @@ test.describe('PR #2 Review Regressions', () => {
     
     // Reload
     await page.reload()
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
     
     // Wait for game ready
     await expect.poll(async () => {
@@ -82,7 +83,7 @@ test.describe('PR #2 Review Regressions', () => {
       const state = await page.evaluate(() => window.__tatematika!.getGameState())
       const correctCount = state.balloons.filter((b: any) => b.isCorrect).length
       return !jumpState.isJumping && correctCount === 1
-    }, { timeout: 10000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     // Assert count AFTER reload per spec K9
     const stateAfter = await page.evaluate(() => window.__tatematika!.getGameState())
@@ -107,7 +108,7 @@ test.describe('PR #2 Review Regressions', () => {
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       return !jumpState.isJumping
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     // Install per-frame recorder tracking jump progress and geometry
     await page.evaluate((targetId) => {
@@ -168,7 +169,7 @@ test.describe('PR #2 Review Regressions', () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       const newState = await page.evaluate(() => window.__tatematika!.getGameState())
       return !jumpState.isJumping && newState.stars === state.stars + 1
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     // Stop recording and analyze timeline
     const frames = await page.evaluate(() => {
@@ -256,7 +257,7 @@ test.describe('PR #2 Review Regressions', () => {
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       return !jumpState.isJumping
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     // Install per-frame recorder tracking balloon IDs and pop state
     // Records until new round appears (stars increment) with 3s timeout
@@ -448,7 +449,7 @@ test.describe('PR #2 Review Regressions', () => {
       }))
     })
     await page.reload()
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
     
     // Complete the level
     for (let i = 0; i < 5; i++) {
@@ -937,7 +938,7 @@ test.describe('PR #2 Review Regressions', () => {
     `)
     
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
     
     // Ensure unmuted initially
     const initialMuted = await page.evaluate(() => window.__tatematika!.isMuted())
@@ -950,7 +951,7 @@ test.describe('PR #2 Review Regressions', () => {
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       return !jumpState.isJumping
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     // Click a WRONG balloon to get boing (0.2s) + meow (0.3s) sounds that are genuinely still playing
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
@@ -1101,7 +1102,7 @@ test.describe('PR #2 Review Regressions', () => {
     await expect.poll(async () => {
       const currentAttempts = await page.evaluate(() => window.__tatematika!.getGameState().wrongAttempts)
       return currentAttempts > wrongAttemptsBefore
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     // Wait additional 100ms to ensure sounds would have played
     await page.waitForTimeout(100)
@@ -1149,7 +1150,7 @@ test.describe('PR #2 Review Regressions', () => {
     })
     
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
     
     // BASELINE: measure one wrong tap alone to establish N oscillator starts and bounce behavior
     const stateBaseline = await page.evaluate(() => window.__tatematika!.getGameState())
@@ -1159,7 +1160,7 @@ test.describe('PR #2 Review Regressions', () => {
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       return !jumpState.isJumping
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     const { canvasRect, scale } = await page.evaluate(() => {
       const game = window.__tatematika!.getGame()
@@ -1185,7 +1186,7 @@ test.describe('PR #2 Review Regressions', () => {
     await expect.poll(async () => {
       const currentAttempts = await page.evaluate(() => window.__tatematika!.getGameState().wrongAttempts)
       return currentAttempts > baselineWrongAttemptsBefore
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     // Check bounce right after cat arrives
     const baselineBounced = await page.evaluate((id) => {
@@ -1227,7 +1228,7 @@ test.describe('PR #2 Review Regressions', () => {
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       return !jumpState.isJumping
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     const boundsA = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), balloonA.id)
     const clickXA = canvasRect.left + (boundsA.x + boundsA.width / 2) * scale
@@ -1272,7 +1273,7 @@ test.describe('PR #2 Review Regressions', () => {
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       return !jumpState.isJumping
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     // Poll until wrongAttempts stabilizes (no changes for 100ms), indicating all jumps/sounds are done
     let lastWrongAttempts = await page.evaluate(() => window.__tatematika!.getGameState().wrongAttempts)

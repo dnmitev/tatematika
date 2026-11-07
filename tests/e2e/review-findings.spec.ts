@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS } from './test-timeouts'
 import { popCorrectBalloonAndWait, getGameScaleAndRect } from './helpers'
 
 /**
@@ -9,7 +10,7 @@ import { popCorrectBalloonAndWait, getGameScaleAndRect } from './helpers'
 test.describe('Review Findings - Regression Tests', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
 
   test('Finding 1: К4 - Wrong balloon must bounce (spec §4 rule 5)', async ({ page }) => {
@@ -166,7 +167,7 @@ test.describe('Review Findings - Touch Input', () => {
 
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
 
   test('Finding 2b: К8 - Touch must move cat under balloon and make it jump (spec §3)', async ({ page }) => {
@@ -297,7 +298,7 @@ test.describe('Review Findings - Touch Input', () => {
 test.describe('Review Findings - Keyboard Input', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
 
   test('Finding 2c: К8 - Keyboard arrow keys and space must move cat and make it jump', async ({ page }) => {
@@ -409,7 +410,7 @@ test.describe('Review Findings - Keyboard Input', () => {
 test.describe('Review Findings - Other Tests', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
 
   test('Finding 3: К3 - Correct pop must play "пук" sound (spec §7)', async ({ page }) => {
@@ -426,7 +427,7 @@ test.describe('Review Findings - Other Tests', () => {
     await expect.poll(async () => {
       const sound = await page.evaluate(() => window.__tatematika!.getLastPlayedSound())
       return sound !== null && sound !== undefined
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     const lastSound = await page.evaluate(() => window.__tatematika!.getLastPlayedSound())
     expect(['pop', 'пук', 'correct']).toContain(lastSound)
@@ -521,7 +522,7 @@ test.describe('Review Findings - Other Tests', () => {
     })
     
     await page.reload()
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
     
     // Pop 5 correct balloons to complete the level
     for (let i = 0; i < 5; i++) {
@@ -532,7 +533,7 @@ test.describe('Review Findings - Other Tests', () => {
     await expect.poll(async () => {
       const text = await page.evaluate(() => window.__tatematika!.getLevelEndText())
       return text !== null && text.includes('Ти успя')
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     const levelText = await page.evaluate(() => window.__tatematika!.getLevelEndText())
     expect(levelText).toBeTruthy()
@@ -557,7 +558,7 @@ test.describe('Review Findings - Other Tests', () => {
     })
     
     await page.reload()
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
     
     // Complete level 1 (5 stars)
     for (let i = 0; i < 5; i++) {
@@ -573,7 +574,7 @@ test.describe('Review Findings - Other Tests', () => {
     await expect.poll(async () => {
       const s = await page.evaluate(() => window.__tatematika!.getGameState())
       return s.stars === 0 && s.balloons.length === 3
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     const stateAfter = await page.evaluate(() => window.__tatematika!.getGameState())
     expect(stateAfter.target).toBeGreaterThanOrEqual(0)

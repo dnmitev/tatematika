@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { INIT_TIMEOUT_MS } from './test-timeouts'
 import { getGameScaleAndRect } from './helpers'
 
 /**
@@ -338,7 +339,7 @@ test.describe('HUD Geometry - 320×568 @mobile', () => {
   
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
   
   test('HUD elements with 3 balloons', async ({ page }) => {
@@ -362,7 +363,7 @@ test.describe('HUD Geometry - 375×667 @mobile', () => {
   
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
   
   test('HUD elements with 3 balloons', async ({ page }) => {
@@ -386,7 +387,7 @@ test.describe('HUD Geometry - 1280×800', () => {
   
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
   
   test('HUD elements with 3 balloons', async ({ page }) => {

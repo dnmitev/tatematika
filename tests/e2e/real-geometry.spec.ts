@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { INIT_TIMEOUT_MS } from './test-timeouts'
 
 /**
  * Real Geometry Measurement Tests
@@ -20,7 +21,7 @@ test.describe('Real Geometry - 320×568 (Small Mobile) @mobile', () => {
   
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
 
   test('Formula text must be at least 32 CSS pixels tall (spec §7)', async ({ page }) => {
@@ -232,7 +233,7 @@ test.describe('Real Geometry - 375×667 (iPhone 6/7/8) @mobile', () => {
   
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
 
   test('All critical elements meet minimums', async ({ page }) => {
@@ -309,7 +310,7 @@ test.describe('Real Geometry - 1280×800 (Desktop)', () => {
   
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
 
   test('All elements remain above minimums on desktop', async ({ page }) => {
@@ -373,7 +374,7 @@ test.describe('Real Geometry - 1280×800 (Desktop)', () => {
     })
     
     await page.reload()
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
     
     const result = await page.evaluate(() => {
       const game = window.__tatematika!.getGame()
@@ -417,7 +418,7 @@ test.describe('Real Geometry - Settings Button @mobile', () => {
   
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
 
   test('Settings button must be at least 64×64 CSS pixels (spec §3)', async ({ page }) => {
