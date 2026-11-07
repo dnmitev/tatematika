@@ -532,12 +532,67 @@ export async function readTopPanel(page: Page): Promise<TopPanelReading> {
     const catBounds = scene.cat?.getBounds ? scene.cat.getBounds() : null
     const catOverlapsPanel = overlaps(catBounds)
     let feedbackOverlapsPanel = false
+    const markFeedback = (bounds: { x: number, y: number, width: number, height: number } | null) => {
+      if (overlaps(bounds)) feedbackOverlapsPanel = true
+    }
     for (const text of texts) {
       const feedback = text.text.includes('Опа!') || text.text.includes('Браво') || text.text.includes('Супер') || text.text.includes('Точно така') || text.text === 'Вярно' || text.text === 'Грешно'
       if (!feedback || !panel) continue
-      const bounds = { x: text.left, y: text.top, width: text.right - text.left, height: text.bottom - text.top }
-      if (overlaps(bounds)) feedbackOverlapsPanel = true
+      markFeedback({ x: text.left, y: text.top, width: text.right - text.left, height: text.bottom - text.top })
     }
+    const accessibleName = (el: Element) => {
+      const aria = norm(el.getAttribute('aria-label'))
+      const alt = norm(el.getAttribute('alt'))
+      const title = norm(el.getAttribute('title'))
+      let own = ''
+      for (const node of el.childNodes) {
+        if (node.nodeType === Node.TEXT_NODE) own += node.textContent ?? ''
+      }
+      own = norm(own)
+      if (aria === 'Вярно' || aria === 'Грешно') return aria
+      if (alt === 'Вярно' || alt === 'Грешно') return alt
+      if (title === 'Вярно' || title === 'Грешно') return title
+      if (own === 'Вярно' || own === 'Грешно') return own
+      return ''
+    }
+    for (const el of document.body.querySelectorAll('*')) {
+      const name = accessibleName(el)
+      if (!name || !shown(el)) continue
+      let parent = el.parentElement
+      let nested = false
+      while (parent && parent !== document.body) {
+        if (accessibleName(parent) === name) {
+          nested = true
+          break
+        }
+        parent = parent.parentElement
+      }
+      if (nested) continue
+      const rect = el.getBoundingClientRect()
+      markFeedback({
+        x: (rect.left - canvasRect.left) / scale,
+        y: (rect.top - canvasRect.top) / scale,
+        width: rect.width / scale,
+        height: rect.height / scale
+      })
+    }
+    const balloonGraphics = new Set<any>()
+    for (const balloon of scene.balloonSprites || []) {
+      if (balloon?.sprite) balloonGraphics.add(balloon.sprite)
+      if (balloon?.text) balloonGraphics.add(balloon.text)
+    }
+    const walkIcons = (list: any[]) => {
+      for (const child of list || []) {
+        if (!child) continue
+        const type = child.type
+        const visible = child.visible !== false && (typeof child.alpha !== 'number' || child.alpha > 0.01)
+        if (visible && (type === 'Image' || type === 'Sprite' || type === 'Graphics') && child !== scene.cat && !balloonGraphics.has(child) && child.getBounds) {
+          markFeedback(child.getBounds())
+        }
+        if (child.list) walkIcons(child.list)
+      }
+    }
+    walkIcons(scene.children?.list || [])
 
     return {
       instructionFound: !!instruction,
@@ -664,6 +719,11 @@ async function sampleCat(page: Page, mode: 'idle' | 'walk' | 'jump' | 'landing' 
       return best?.id
     }
 
+    const before = window.__tatematika!.getGameState()
+    const beforeStars = before.stars
+    const beforeWrong = before.wrongAttempts
+    const beforeIds = before.balloons.map(balloon => balloon.id).join(',')
+
     if (mode === 'jump' || mode === 'landing' || mode === 'correct' || mode === 'wrong') {
       const id = choose(mode === 'correct' ? 'correct' : 'wrong')
       if (id) window.__tatematika!.clickBalloon(id)
@@ -671,25 +731,42 @@ async function sampleCat(page: Page, mode: 'idle' | 'walk' | 'jump' | 'landing' 
       window.__tatematika!.pressKey('right')
     }
 
+    const hasIcon = (name: string) => {
+      const norm = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim()
+      for (const el of document.body.querySelectorAll('*')) {
+        const aria = norm(el.getAttribute('aria-label'))
+        const alt = norm(el.getAttribute('alt'))
+        const title = norm(el.getAttribute('title'))
+        let own = ''
+        for (const node of el.childNodes) {
+          if (node.nodeType === Node.TEXT_NODE) own += node.textContent ?? ''
+        }
+        own = norm(own)
+        if (aria === name || alt === name || title === name || own === name) return true
+      }
+      return false
+    }
+
     const started = performance.now()
     let sawJump = false
-    let sawFeedback = false
+    let sawReaction = false
     let landings = 0
     await new Promise<void>((resolve) => {
       const onFrame = () => {
         const jumping = window.__tatematika!.getCatJumpState().isJumping
         const pos = window.__tatematika!.getCatPosition()
         if (jumping) sawJump = true
-        let feedbackOn = false
         if (mode === 'correct' || mode === 'wrong') {
-          for (const child of scene.children?.list || []) {
-            if (child?.type === 'Text' && child.visible && child.alpha > 0.01) {
-              const value = String(child.text ?? '')
-              if (/Браво|Супер|Точно така|Опа/.test(value)) {
-                feedbackOn = true
-                sawFeedback = true
-              }
-            }
+          const state = window.__tatematika!.getGameState()
+          const ids = state.balloons.map(balloon => balloon.id).join(',')
+          const popped = (scene.balloonSprites || []).some((balloon: any) => balloon.isPopping)
+          const bounced = (scene.balloonSprites || []).some((balloon: any) => balloon.isBouncing)
+          const landed = sawJump && !jumping
+          if (mode === 'correct' && (state.stars > beforeStars || popped || ids !== beforeIds || hasIcon('Вярно'))) {
+            sawReaction = true
+          }
+          if (mode === 'wrong' && (state.wrongAttempts > beforeWrong || bounced || landed || hasIcon('Грешно'))) {
+            sawReaction = true
           }
         }
         const keep =
@@ -697,7 +774,7 @@ async function sampleCat(page: Page, mode: 'idle' | 'walk' | 'jump' | 'landing' 
           mode === 'walk' ||
           (mode === 'jump' && jumping) ||
           (mode === 'landing' && sawJump && !jumping) ||
-          ((mode === 'correct' || mode === 'wrong') && feedbackOn)
+          ((mode === 'correct' || mode === 'wrong') && sawReaction)
         if (keep) {
           if (mode === 'landing' && sawJump && !jumping) landings += 1
           if (mode !== 'landing' || landings > 0) push()
@@ -706,11 +783,12 @@ async function sampleCat(page: Page, mode: 'idle' | 'walk' | 'jump' | 'landing' 
           window.__tatematika!.pressKey(pos.x < game.scale.width / 2 ? 'right' : 'left')
         }
         const elapsed = performance.now() - started
+        const idle = !jumping
         const done =
           (mode === 'idle' || mode === 'walk') ? elapsed >= 1000 :
           mode === 'landing' ? (landings >= 4 || elapsed >= 8000) :
-          mode === 'jump' ? ((sawJump && !jumping && frames.length >= 2) || elapsed >= 8000) :
-          ((sawFeedback && !feedbackOn && frames.length >= 2) || elapsed >= 8000)
+          mode === 'jump' ? ((sawJump && idle && frames.length >= 2) || elapsed >= 8000) :
+          ((sawReaction && idle && frames.length >= 2) || elapsed >= 8000)
         if (done) {
           scene.events.off('postupdate', onFrame)
           resolve()

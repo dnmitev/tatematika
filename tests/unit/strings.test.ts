@@ -113,8 +113,11 @@ describe('Bulgarian Strings', () => {
 
   describe('Cyrillic encoding', () => {
     it('should properly encode Bulgarian Cyrillic characters', () => {
-      // Check that strings contain Cyrillic characters
-      expect(PRAISE_MESSAGES[0]).toMatch(/[А-Яа-я]/)
+      // Every exported praise string must be Cyrillic. An empty list
+      // satisfies this, which is what §6 requires (no visible praise).
+      for (const message of PRAISE_MESSAGES) {
+        expect(message).toMatch(/[А-Яа-я]/)
+      }
       expect(WRONG_ANSWER_MESSAGE).toMatch(/[А-Яа-я]/)
       expect(LEVEL_COMPLETE_TITLE).toMatch(/[А-Яа-я]/)
       expect(BUTTON_PLAY_AGAIN).toMatch(/[А-Яа-я]/)
