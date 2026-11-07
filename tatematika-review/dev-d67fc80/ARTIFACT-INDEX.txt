@@ -1,0 +1,157 @@
+Evidence Collection Artifact Index
+Target: d67fc80 (author timeout update + landing phase work)
+Date: 2026-11-07 13:30 UTC
+Location: /workspace/tatematika-review/dev-d67fc80/
+
+=== SUMMARY REPORT ===
+EVIDENCE-REPORT.md                  - Comprehensive analysis, timelines, and conclusions
+
+=== ARCHIVE ===
+evidence-d67fc80.tar.gz             - Complete artifact bundle (59 MB)
+
+=== GIT CONTEXT ===
+git-context.txt                     - Repository state, commit SHAs
+
+=== PROBE SCRIPTS ===
+probe-frame-log.js                  - Frame-level data collection injector
+run-k12-trace.ts                    - K12 test wrapper with instrumentation
+run-shuffle-trace.ts                - Shuffle test wrapper with round timing
+run-finding1-trace.ts               - Finding1 test wrapper with state capture
+
+=== K12 TEST ARTIFACTS ===
+k12-trace/
+  ├── frame-log.json                - 89 frames, 26 KB
+  └── frame-log.csv                 - CSV format, 7.5 KB
+
+k12-playwright-output-v2/
+  └── run-k12-trace-K12-with-frame-logging-desktop/
+      ├── trace.zip                 - Playwright trace (1.6 MB)
+      └── error-context.md
+
+k12-run.log                         - Console output (failed first run)
+k12-run-v2.log                      - Console output (successful run)
+
+RESULT: ✅ PASSED (16.8s)
+- Phase coverage: walk=142, jump=319, landing=7
+- 519 rapid clicks properly ignored
+- Landing phase lock working correctly
+
+=== SHUFFLE TEST ARTIFACTS ===
+shuffle-trace/
+  ├── round-timings.json            - 30 rounds, 4.7 KB
+  ├── round-timings.csv             - CSV format, 1.2 KB
+  └── failure-state.json            - State at timeout, 959 B
+
+shuffle-playwright-output-v2/
+  └── run-shuffle-trace-Shuffle-Count-3-with-round-timing-desktop/
+      ├── trace.zip                 - Playwright trace
+      └── error-context.md
+
+shuffle-run.log                     - Console output (1st attempt, 28 rounds)
+shuffle-run-v2.log                  - Console output (2nd attempt, 29 rounds)
+
+RESULT: ❌ FAILED at 120s test timeout
+- Completed: 29/30 rounds successfully
+- Average: 3.87s per round (range 2.06s - 7.87s)
+- Total time: 112.2s (29 rounds)
+- Failure cause: CUMULATIVE TIMEOUT, not stuck lock
+- Round 30 was in landing phase when timeout hit
+- Verdict: Test timeout too tight (120s for 30×4s = need ≥150s)
+
+=== FINDING1 TEST ARTIFACTS ===
+finding1-trace/
+  ├── frame-log.json                - Per-frame state during bounce
+  └── success.json                  - Final state
+
+finding1-playwright-output/
+  └── run-finding1-trace-Finding-1-Wrong-balloon-bounce-with-state-capture-desktop/
+      ├── trace.zip                 - Playwright trace
+      └── error-context.md
+
+finding1-run.log                    - Console output with bounce timeline
+
+RESULT: ✅ PASSED (13.6s)
+- Click → walk (1s) → jump (5.5s) → idle
+- wrongAttempts: 0 → 1 ✓
+- No stuck state
+
+=== KEY FIELDS CAPTURED ===
+Per-Frame Logs (all tests):
+  - wallMs, loopDelta, rawDelta
+  - actionPhase, actionLocked
+  - catIsJumping, catJumpTime, landingFrameTime
+  - popAnimationStartTime, stars, wrongAttempts
+  - NO ||0 MASKING - exact raw values preserved
+
+Round Timings (shuffle):
+  - round, startWall, endWall, duration
+  - starsBefore, roundToken, success/error
+
+=== VIEWING TRACES ===
+npx playwright show-trace <path-to-trace.zip>
+
+Example:
+cd /workspace/tatematika-review/dev-d67fc80
+npx playwright show-trace k12-playwright-output-v2/.../trace.zip
+
+=== REPRODUCING ===
+See EVIDENCE-REPORT.md section "Commands to Reproduce"
+
+Git setup:
+  cd /agent/repos/tatematika
+  git checkout d67fc80
+
+Test execution:
+  npx playwright test run-k12-trace.spec.ts --project=desktop --trace on
+  npx playwright test run-shuffle-trace.spec.ts --project=desktop --trace on
+  npx playwright test run-finding1-trace.spec.ts --project=desktop --trace on
+
+=== CONCLUSIONS ===
+1. Landing phase lock: ✅ WORKING CORRECTLY
+2. Individual action timeout (20s): ✅ ADEQUATE (max observed 7.87s)
+3. Multi-round test timeouts: ❌ TOO TIGHT
+   - Recommendation: 30 rounds need ≥150s (5s/round + margin)
+   - 60 rounds need ≥330s (5.5 minutes)
+4. Wrong balloon bounce: ✅ WORKS CORRECTLY
+5. No stuck locks detected in any test
+
+AUTHOR ACTION REQUIRED:
+- Increase shuffle test timeouts (120s → 150s for 30 rounds, 240s → 330s for 60)
+- Keep ACTION_TIMEOUT_MS = 20000 (adequate for individual actions)
+- Evidence shows rounds complete correctly; only cumulative time exceeds limit
+
+=== FILE TREE ===
+/workspace/tatematika-review/dev-d67fc80/
+├── evidence-d67fc80.tar.gz (59 MB)
+├── EVIDENCE-REPORT.md (15 KB)
+├── ARTIFACT-INDEX.txt (this file)
+├── git-context.txt
+├── probe-frame-log.js
+├── run-k12-trace.ts
+├── run-shuffle-trace.ts
+├── run-finding1-trace.ts
+├── k12-trace/
+│   ├── frame-log.json
+│   └── frame-log.csv
+├── k12-playwright-output-v2/
+│   └── .../trace.zip
+├── k12-run.log
+├── k12-run-v2.log
+├── shuffle-trace/
+│   ├── round-timings.json
+│   ├── round-timings.csv
+│   └── failure-state.json
+├── shuffle-playwright-output-v2/
+│   └── .../trace.zip
+├── shuffle-run.log
+├── shuffle-run-v2.log
+├── finding1-trace/
+│   ├── frame-log.json
+│   └── success.json
+├── finding1-playwright-output/
+│   └── .../trace.zip
+└── finding1-run.log
+
+Total size: 124 MB (59 MB compressed)
+
+=== END ===
