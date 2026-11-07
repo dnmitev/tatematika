@@ -107,6 +107,21 @@ export interface TatematikaTestHook {
    * "K12/K13 CONTRACT: getActionPhase hook must be implemented"
    */
   getActionPhase?(): 'idle' | 'walk' | 'jump' | 'landing'
+
+  /**
+   * K19 read-only identity of one on-screen balloon sprite.
+   * instanceId identifies the sprite object (not the logical balloon id) and
+   * must stay the same across frames. color is the body fill 0xRRGGBB.
+   * tint is the Phaser tint. alpha is not required to be 1.
+   * Type stub only: tests read the live sprite through getGame() until this exists.
+   */
+  getBalloonFrame?(balloonId: string): {
+    instanceId: string
+    visible: boolean
+    alpha: number
+    color: number
+    tint: number
+  } | null
 }
 
 // Expose test hooks

@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
-import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS } from './test-timeouts'
+import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS, multiRoundTestTimeout } from './test-timeouts'
+import { balloonId, watchBalloonAnswer } from './feedback-observers'
 
 /**
  * K12-K16: Input During Action Tests
@@ -529,6 +530,39 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   // Cat is idle, nothing queued
   const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
   expect(jumpState.isJumping, 'Cat should be idle after landing, nothing queued').toBe(false)
+})
+
+test('К12: repeated input during a correct answer does not add a feedback icon', async ({ page }) => {
+  test.setTimeout(multiRoundTestTimeout(1))
+  await expect.poll(async () => {
+    const jump = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+    return !jump.isJumping
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
+  const id = await balloonId(page, 'correct')
+  const watch = await watchBalloonAnswer(page, id, true)
+  expect(watch.stateAfter.stars, 'К12 precondition: the accepted answer is evaluated once').toBe(watch.stateBefore.stars + 1)
+  expect(
+    watch.maxCorrectIcons,
+    'К12: exactly one „Вярно“ icon for the single evaluation and no additional icon'
+  ).toBe(1)
+  expect(watch.maxIcons, 'К12: rejected input must not show an extra icon').toBeLessThanOrEqual(1)
+})
+
+test('К13: repeated input during a wrong answer does not add a feedback icon', async ({ page }) => {
+  test.setTimeout(multiRoundTestTimeout(1))
+  await expect.poll(async () => {
+    const jump = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+    return !jump.isJumping
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
+  const id = await balloonId(page, 'wrong')
+  const watch = await watchBalloonAnswer(page, id, true)
+  expect(watch.stateAfter.wrongAttempts, 'К13 precondition: the accepted answer is evaluated').toBeGreaterThan(watch.stateBefore.wrongAttempts)
+  expect(watch.stateAfter.target, 'К13: target stays on the same round').toBe(watch.stateBefore.target)
+  expect(
+    watch.maxWrongIcons,
+    'К13: exactly one „Грешно“ icon for the single evaluation and no additional icon'
+  ).toBe(1)
+  expect(watch.maxIcons, 'К13: rejected input must not show an extra icon').toBeLessThanOrEqual(1)
 })
 
 test('K14: No re-execution of rejected inputs after landing (correct balloon)', async ({ page }) => {
