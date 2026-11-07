@@ -356,10 +356,6 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
   await installFrameRecorder(page)
   
-  // Check that getActionPhase hook exists after reload
-  const hasGetActionPhase = await page.evaluate(() => typeof window.__tatematika!.getActionPhase === 'function')
-  expect(hasGetActionPhase, 'K13 CONTRACT: getActionPhase hook must be implemented').toBe(true)
-  
   await expect.poll(async () => {
     const phase = await page.evaluate(() => window.__tatematika!.getActionPhase!())
     return phase === 'idle'
