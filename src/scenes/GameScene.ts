@@ -1036,12 +1036,17 @@ export class GameScene extends Phaser.Scene {
     this.catJumpTime = 0
     this.pendingJumpBalloonId = null
     this.jumpTargetBalloonId = null
+    this.jumpContactMade = false
+    this.popAnimationStartTime = 0
+    this.popAnimationCompleted = false
     this.catY = this.catJumpStartY
-    this.drawCat(this.cat, this.catX, this.catY)
     
     this.gameState.round = createRound(settings)
     this.createBalloons()
     this.updateUI()
+    
+    // Redraw cat after new balloons are created
+    this.drawCat(this.cat, this.catX, this.catY)
   }
 
   public getGameState() {
