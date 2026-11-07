@@ -484,7 +484,14 @@ export class GameScene extends Phaser.Scene {
           if (currentAspect < 0.75) {
             balloonWidth = balloonHeight * 0.75
           } else if (currentAspect > 1.05) {
-            balloonHeight = balloonWidth / 1.05
+            // Increase height to fix aspect ratio, but re-check safe zone constraint
+            const desiredHeight = balloonWidth / 1.05
+            if (desiredHeight <= maxBalloonHeight) {
+              balloonHeight = desiredHeight
+            } else {
+              // Safe zone constraint takes priority; shrink width instead
+              balloonWidth = balloonHeight * 1.05
+            }
           }
         }
       }
@@ -521,7 +528,14 @@ export class GameScene extends Phaser.Scene {
           if (currentAspect < 0.75) {
             balloonWidth = balloonHeight * 0.75
           } else if (currentAspect > 1.05) {
-            balloonHeight = balloonWidth / 1.05
+            // Increase height to fix aspect ratio, but re-check safe zone constraint
+            const desiredHeight = balloonWidth / 1.05
+            if (desiredHeight <= maxBalloonHeight) {
+              balloonHeight = desiredHeight
+            } else {
+              // Safe zone constraint takes priority; shrink width instead
+              balloonWidth = balloonHeight * 1.05
+            }
           }
         }
       }
