@@ -897,50 +897,64 @@ test.describe('PR #2 Review Regressions', () => {
       }
     })
     
+    // Install in-page Promise that resolves when first oscillator starts
+    await page.evaluate(() => {
+      (window as any).__firstOscillatorStarted = new Promise((resolve) => {
+        (window as any).__resolveFirstOscillatorStart = resolve
+      })
+      
+      // Patch to detect first oscillator start
+      const oscs = (window as any).__audioInstrumentation.oscillators
+      const checkInterval = setInterval(() => {
+        for (const osc of oscs) {
+          if (osc.startWhen >= 0) {
+            clearInterval(checkInterval)
+            ;(window as any).__resolveFirstOscillatorStart()
+            break
+          }
+        }
+      }, 1)
+    })
+    
     // Real click on wrong balloon to trigger boing + meow
     const clickX = canvasRect.left + (balloonBounds.x + balloonBounds.width / 2) * scale
     const clickY = canvasRect.top + (balloonBounds.y + balloonBounds.height / 2) * scale
     
     await page.mouse.click(clickX, clickY)
     
-    // Poll until an oscillator is started AND still scheduled to play (stopWhen > currentTime + 0.1)
-    await expect.poll(async () => {
-      const info = await page.evaluate(() => {
-        const oscs = (window as any).__audioInstrumentation?.oscillators || []
-        for (const osc of oscs) {
-          if (osc.startWhen >= 0 && osc.stopWhen > 0) {
-            const stillAudible = osc.stopWhen > (osc.ctx?.currentTime + 0.1)
-            if (stillAudible) {
-              return {
-                audible: true,
-                stopWhen: osc.stopWhen,
-                ctxTime: osc.ctx?.currentTime
-              }
-            }
-          }
-        }
-        return { audible: false }
-      })
-      return info.audible
-    }, { timeout: 1000, intervals: [20] }).toBe(true)
+    // Wait for first oscillator to start (ensures sound system active)
+    await page.evaluate(() => (window as any).__firstOscillatorStarted)
     
-    // PRECONDITION: at least one oscillator is audible (stopWhen > ctx.currentTime + 0.1)
+    // Short delay to ensure oscillator is fully scheduled
+    await page.waitForTimeout(5)
+    
+    // PRECONDITION: at least one oscillator is audible (stopWhen > ctx.currentTime + 0.05)
+    // Using 0.05s threshold instead of 0.1s to account for evaluate latency
     const stateBeforeMute = await page.evaluate(() => {
       const oscs = (window as any).__audioInstrumentation?.oscillators || []
-      const audibleOscs = oscs.filter((o: any) => 
-        o.startWhen >= 0 && o.stopWhen > (o.ctx?.currentTime + 0.1))
+      const audibleOscs = oscs.filter((o: any) => {
+        if (o.startWhen >= 0 && o.stopWhen > 0 && o.ctx) {
+          const remaining = o.stopWhen - o.ctx.currentTime
+          return remaining > 0.05
+        }
+        return false
+      })
       return {
         totalOscillators: oscs.length,
         audibleCount: audibleOscs.length,
         audibleOscillators: audibleOscs.map((o: any) => ({
           startWhen: o.startWhen,
           stopWhen: o.stopWhen,
-          ctxTime: o.ctx?.currentTime
+          ctxTime: o.ctx?.currentTime,
+          remaining: o.stopWhen - o.ctx?.currentTime
         }))
       }
     })
     
-    expect(stateBeforeMute.audibleCount, 'precondition: at least one oscillator must be audible before mute').toBeGreaterThan(0)
+    expect(
+      stateBeforeMute.audibleCount,
+      `precondition: 0 audible oscillators (need > 0). Total: ${stateBeforeMute.totalOscillators}, details: ${JSON.stringify(stateBeforeMute.audibleOscillators)}`
+    ).toBeGreaterThan(0)
     
     // NOW MUTE via REAL control (click Phaser mute button)
     // Snapshot will be captured by pointerdown listener BEFORE Phaser handles it
