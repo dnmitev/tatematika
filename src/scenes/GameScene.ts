@@ -637,16 +637,12 @@ export class GameScene extends Phaser.Scene {
     const isCorrect = checkBalloon(this.gameState.round, balloonId)
     
     if (!isCorrect) {
-      // Handle visual/audio feedback for wrong balloon
-      const balloon = this.balloonSprites.find(b => b.id === balloonId)
-      if (balloon) {
-        balloon.isBouncing = true
-        balloon.bounceStartTime = this.time.now
-        this.playSound('boing')
-      }
-      this.playSound('meow')
-      this.showFeedback(WRONG_ANSWER_MESSAGE)
+      // Increment wrongAttempts immediately, but bounce starts at contact point
+      this.gameState.round = handleWrongAttempt(this.gameState.round)
+      this.updateUI()
     }
+    
+    // Balloon feedback (pop/bounce) and sound will be triggered at contact point (50% progress)
   }
 
   private handleCorrectBalloon(balloonId: string) {
@@ -875,10 +871,11 @@ export class GameScene extends Phaser.Scene {
         this.drawCat(this.cat, this.catX, this.catY)
         
         if (!this.jumpContactMade && progress >= 0.5 && this.jumpTargetBalloonId) {
+          this.jumpContactMade = true
           const isCorrect = checkBalloon(this.gameState.round, this.jumpTargetBalloonId)
+          const balloon = this.balloonSprites.find(b => b.id === this.jumpTargetBalloonId)
+          
           if (isCorrect) {
-            this.jumpContactMade = true
-            const balloon = this.balloonSprites.find(b => b.id === this.jumpTargetBalloonId)
             if (balloon) {
               balloon.isPopping = true
               balloon.popStartTime = time
@@ -887,6 +884,15 @@ export class GameScene extends Phaser.Scene {
             }
             this.showFeedback(getPraiseMessage(this.praiseIndex))
             this.praiseIndex++
+          } else {
+            // Start bounce for wrong balloon at contact point
+            if (balloon) {
+              balloon.isBouncing = true
+              balloon.bounceStartTime = time
+              this.playSound('boing')
+            }
+            this.playSound('meow')
+            this.showFeedback(WRONG_ANSWER_MESSAGE)
           }
         }
       } else {
@@ -910,8 +916,8 @@ export class GameScene extends Phaser.Scene {
           bs.isBouncing = false
           bs.sprite.setY(bs.y)
           bs.text.setY(bs.y)
-          // Check if this is the target balloon that finished bouncing
-          if (bs.id === this.jumpTargetBalloonId && this.actionLocked && !this.jumpContactMade) {
+          // Check if this is the target balloon that finished bouncing (wrong balloon)
+          if (bs.id === this.jumpTargetBalloonId && this.actionLocked && this.popAnimationStartTime === 0) {
             this.wrongBalloonBounceCompleted = true
           }
         }
@@ -979,12 +985,10 @@ export class GameScene extends Phaser.Scene {
       this.actionTargetBalloonId = null
     }
     
-    // Handle wrong balloon bounce completion
+    // Handle wrong balloon bounce completion - unlock action
     if (this.wrongBalloonBounceCompleted && !this.catIsJumping && this.actionLocked) {
-      this.gameState.round = handleWrongAttempt(this.gameState.round)
-      this.updateUI()
-      
-      // Unlock action after wrong balloon evaluation
+      // Unlock action after wrong balloon bounce completes
+      // (wrongAttempts was already incremented in jumpToBalloon)
       this.actionLocked = false
       this.actionTargetBalloonId = null
       this.jumpTargetBalloonId = null
