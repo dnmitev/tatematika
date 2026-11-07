@@ -73,7 +73,7 @@ interface CellPosition {
   col: number
 }
 
-async function playRoundsAndRecordSlots(page: any, count: number, rounds: number): Promise<{ 
+async function playRoundsAndRecordSlots(page: any, count: number, rounds: number, seed?: number): Promise<{ 
   slots: number[], 
   cells: CellPosition[],
   roundTokens: number[], 
@@ -83,6 +83,30 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
   const cells: CellPosition[] = []
   const roundTokens: number[] = []
   let levelCompleteAppeared = false
+  
+  // Inject seeded RNG for round generation via K17 test hook
+  // This ensures deterministic shuffle by isolating round-generation randomness
+  // from timing-dependent Math.random calls (colors, IDs)
+  if (seed !== undefined) {
+    await page.evaluate((s) => {
+      // Create a dedicated Mulberry32 PRNG for round generation
+      let state = s
+      const roundRng = () => {
+        state |= 0
+        state = state + 0x6D2B79F5 | 0
+        let t = Math.imul(state ^ state >>> 15, 1 | state)
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t
+        return ((t ^ t >>> 14) >>> 0) / 4294967296
+      }
+      
+      // Inject via K17 test hook (will be no-op until implemented in src)
+      if (window.__tatematika!.setRoundRng) {
+        window.__tatematika!.setRoundRng(roundRng)
+      }
+      // Note: Global Math.random replacement (in addInitScript) remains as fallback
+      // Once setRoundRng is wired up in src, it will override Math.random for round generation
+    }, seed)
+  }
   
   // Initialize round token counter in the page
   await page.evaluate(() => {
@@ -283,7 +307,7 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
       
       await setBalloonCount(page, count)
-      const result1 = await playRoundsAndRecordSlots(page, count, rounds)
+      const result1 = await playRoundsAndRecordSlots(page, count, rounds, SEED_A)
       
       // Second run: verify determinism with same seed
       await page.addInitScript(getMulberry32Code(SEED_A))
@@ -291,7 +315,7 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
       
       await setBalloonCount(page, count)
-      const result2 = await playRoundsAndRecordSlots(page, count, rounds)
+      const result2 = await playRoundsAndRecordSlots(page, count, rounds, SEED_A)
       
       // Now perform all assertions
       expect(result1.levelCompleteAppeared, 'Level complete screen should not appear during first run').toBe(false)
@@ -331,7 +355,7 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
       
       await setBalloonCount(page, count)
-      const result = await playRoundsAndRecordSlots(page, count, rounds)
+      const result = await playRoundsAndRecordSlots(page, count, rounds, SEED_B)
       
       // Now perform all assertions
       expect(result.levelCompleteAppeared, 'Level complete screen should not appear').toBe(false)

@@ -45,6 +45,37 @@ export interface TatematikaTestHook {
   // Returns the Phaser.Game instance for direct scene/object inspection
   // Used by real-geometry.spec.ts to measure actual rendered sizes
   getGame(): Phaser.Game
+  
+  /**
+   * K17 Test Hook: Controlled RNG for Deterministic Shuffle
+   * 
+   * CONTRACT (K17 requirement: "рандомизацията е контролирана със зададена последователност"):
+   * E2E tests MUST be able to inject a seeded RNG that is used EXCLUSIVELY for:
+   * - Balloon position shuffling in createRound
+   * - Formula generation (operation selection, number selection) in createRound
+   * - Any other round-generation randomness
+   * 
+   * This RNG should NOT be used for:
+   * - Balloon IDs (Date.now() + Math.random() in round.ts is fine)
+   * - Color selection (GameScene.ts:605 Math.random is fine)
+   * - Any rendering/animation timing-dependent randomness
+   * 
+   * Implementation requirement:
+   * When setRoundRng(fn) is called with a seeded PRNG function, ALL round-generation
+   * code in formula-generator.ts must use this injected RNG instead of Math.random().
+   * The shuffle function already accepts an optional rng parameter - wire it through
+   * from createRound.
+   * 
+   * Test behavior:
+   * Tests inject a seeded Mulberry32 PRNG via this hook AND replace global Math.random
+   * as a fallback. With identical seeds, two test runs MUST produce identical balloon
+   * position sequences across 30+ rounds (deterministic shuffle distribution).
+   * 
+   * Until implemented, shuffle-distribution.spec.ts determinism tests will FAIL with
+   * "Same seed should produce identical slot sequence" because Math.random call count
+   * varies per round (colors, IDs, timing), causing RNG stream drift.
+   */
+  setRoundRng?(rngFn: () => number): void
 }
 
 // Expose test hooks

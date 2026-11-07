@@ -253,6 +253,64 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   
   const canvas = await getCanvasCoordinates(page)
   
+  // Measure baseline: how many sounds ONE wrong tap makes
+  await page.evaluate(() => {
+    window.__balloonFrameRecorder.clear()
+    window.__oscillatorStarts = []
+  })
+  
+  const baselineCountBefore = await page.evaluate(() => (window as any).__oscillatorStarts.length)
+  await clickBalloon(page, wrongBalloon.id, canvas)
+  
+  await expect.poll(async () => {
+    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+    return jumpState.isJumping
+  }, { timeout: 2000, intervals: [50] }).toBe(true)
+  
+  await expect.poll(async () => {
+    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+    return !jumpState.isJumping
+  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  
+  await expect.poll(async () => {
+    const newState = await page.evaluate(() => window.__tatematika!.getGameState())
+    return newState.wrongAttempts > initialWrongAttempts
+  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  
+  const baselineCountAfter = await page.evaluate(() => (window as any).__oscillatorStarts.length)
+  const baselineSoundCount = baselineCountAfter - baselineCountBefore
+  
+  const baselineBalloonFrames = await page.evaluate(() => {
+    const result: Record<string, any[]> = {}
+    for (const [id, frames] of window.__balloonFrameRecorder.entries()) {
+      result[id] = frames
+    }
+    return result
+  })
+  
+  const baselineBounced = checkBounce(baselineBalloonFrames[wrongBalloon.id] || [])
+  expect(baselineBounced, 'Baseline: wrong balloon should bounce once').toBe(true)
+  
+  // Now start the actual test: reset state and retry with rejected inputs
+  await page.reload()
+  await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+  await installFrameRecorder(page)
+  
+  await expect.poll(async () => {
+    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+    return !jumpState.isJumping
+  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  
+  const state2 = await page.evaluate(() => window.__tatematika!.getGameState())
+  const wrongBalloons2 = state2.balloons.filter((b: any) => !b.isCorrect)
+  const wrongBalloon2 = wrongBalloons2[0]
+  const correctBalloon2 = state2.balloons.find((b: any) => b.isCorrect)!
+  const initialWrongAttempts2 = state2.wrongAttempts
+  const initialStars2 = state2.stars
+  const initialTarget2 = state2.target
+  
+  const canvas2 = await getCanvasCoordinates(page)
+  
   // Reset frame recorder and sound counter
   await page.evaluate(() => {
     window.__balloonFrameRecorder.clear()
@@ -262,7 +320,7 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   const oscCountBefore = await page.evaluate(() => (window as any).__oscillatorStarts.length)
   
   // Click wrong balloon to start action
-  await clickBalloon(page, wrongBalloon.id, canvas)
+  await clickBalloon(page, wrongBalloon2.id, canvas2)
   
   // Record inputs in all phases
   const inputPhases: string[] = []
@@ -272,8 +330,8 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
     const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
     if (!jumpState.isJumping) {
       inputPhases.push('walk')
-      await clickBalloon(page, correctBalloon.id, canvas)
-      await clickBalloon(page, wrongBalloon.id, canvas)
+      await clickBalloon(page, correctBalloon2.id, canvas2)
+      await clickBalloon(page, wrongBalloon2.id, canvas2)
       await page.keyboard.press('Space')
     } else {
       break
@@ -291,8 +349,8 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
     const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
     if (jumpState.isJumping) {
       inputPhases.push('jump')
-      await clickBalloon(page, correctBalloon.id, canvas)
-      await clickBalloon(page, wrongBalloon.id, canvas)
+      await clickBalloon(page, correctBalloon2.id, canvas2)
+      await clickBalloon(page, wrongBalloon2.id, canvas2)
       await page.keyboard.press('ArrowLeft')
     }
     await page.waitForTimeout(20)
@@ -306,10 +364,10 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   
   for (let i = 0; i < 3; i++) {
     const currentState = await page.evaluate(() => window.__tatematika!.getGameState())
-    if (currentState.wrongAttempts === initialWrongAttempts) {
+    if (currentState.wrongAttempts === initialWrongAttempts2) {
       inputPhases.push('landing')
-      await clickBalloon(page, correctBalloon.id, canvas)
-      await clickBalloon(page, wrongBalloon.id, canvas)
+      await clickBalloon(page, correctBalloon2.id, canvas2)
+      await clickBalloon(page, wrongBalloon2.id, canvas2)
       await page.keyboard.press('Space')
     } else {
       break
@@ -325,27 +383,24 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   // Wait for error to be counted
   await expect.poll(async () => {
     const newState = await page.evaluate(() => window.__tatematika!.getGameState())
-    return newState.wrongAttempts > initialWrongAttempts
+    return newState.wrongAttempts > initialWrongAttempts2
   }, { timeout: 5000, intervals: [50] }).toBe(true)
   
   await page.waitForTimeout(100)
   
   // K13 assertions: wrongAttempts increased exactly once, no additional errors/bounces/sounds
   const finalState = await page.evaluate(() => window.__tatematika!.getGameState())
-  expect(finalState.wrongAttempts, 'Wrong attempts should increase exactly once').toBe(initialWrongAttempts + 1)
-  expect(finalState.stars, 'Stars unchanged').toBe(initialStars)
-  expect(finalState.target, 'Target unchanged (same round)').toBe(initialTarget)
+  expect(finalState.wrongAttempts, 'Wrong attempts should increase exactly once').toBe(initialWrongAttempts2 + 1)
+  expect(finalState.stars, 'Stars unchanged').toBe(initialStars2)
+  expect(finalState.target, 'Target unchanged (same round)').toBe(initialTarget2)
   
-  // Count sounds from rejected inputs (should be 0 additional beyond the first wrong tap)
+  // Count sounds: should match baseline (ONE wrong tap worth of sounds, no additional from rejected inputs)
   const oscCountAfter = await page.evaluate(() => (window as any).__oscillatorStarts.length)
   const soundCount = oscCountAfter - oscCountBefore
   
-  // Should be sounds from ONE wrong tap only (not 1+N from rejected inputs)
-  // Baseline: one wrong tap produces N sounds
-  // With rejected inputs: should still be N sounds total
-  expect(soundCount, 'Should have sounds from first wrong tap only, no additional sounds from rejected inputs').toBeGreaterThan(0)
+  expect(soundCount, `Should have exactly ${baselineSoundCount} sounds (baseline from one wrong tap), no additional from rejected inputs`).toBe(baselineSoundCount)
   
-  // Check for additional bounces on OTHER balloons from rejected inputs
+  // Check balloon bounces
   const balloonFrames = await page.evaluate(() => {
     const result: Record<string, any[]> = {}
     for (const [id, frames] of window.__balloonFrameRecorder.entries()) {
@@ -354,8 +409,13 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
     return result
   })
   
-  // Wrong balloon bounces once (from first tap), other balloons should not bounce
-  const otherBalloons = state.balloons.filter((b: any) => b.id !== wrongBalloon.id)
+  // Wrong balloon should bounce exactly once (from first tap)
+  const wrongBalloonFrames = balloonFrames[wrongBalloon2.id] || []
+  const wrongBalloonBounced = checkBounce(wrongBalloonFrames)
+  expect(wrongBalloonBounced, 'Wrong balloon should bounce exactly once').toBe(true)
+  
+  // Other balloons should not bounce from rejected inputs
+  const otherBalloons = state2.balloons.filter((b: any) => b.id !== wrongBalloon2.id)
   for (const otherBalloon of otherBalloons) {
     const frames = balloonFrames[otherBalloon.id] || []
     const bounced = checkBounce(frames)
@@ -621,15 +681,56 @@ test('K15: New input accepted after action completes (keyboard)', async ({ page 
   
   // Now try new keyboard input - it should be accepted
   const newState = await page.evaluate(() => window.__tatematika!.getGameState())
+  const newCorrectBalloon = newState.balloons.find((b: any) => b.isCorrect)!
+  const newWrongBalloons = newState.balloons.filter((b: any) => !b.isCorrect)
+  const initialStarsAfterFirst = newState.stars
+  const initialWrongAttemptsAfterFirst = newState.wrongAttempts
   
-  // Press arrow key to move
-  await page.keyboard.press('ArrowRight')
-  await page.waitForTimeout(100)
+  // Get correct balloon position for keyboard navigation
+  const newBounds = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), newCorrectBalloon.id)
+  const newCatPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
   
-  // Press Space to jump
+  // Navigate to correct balloon with arrow keys
+  const targetX = newBounds.x + newBounds.width / 2
+  if (newCatPos.x < targetX) {
+    for (let i = 0; i < 20; i++) {
+      await page.keyboard.press('ArrowRight')
+      await page.waitForTimeout(30)
+      const pos = await page.evaluate(() => window.__tatematika!.getCatPosition())
+      if (pos.x >= targetX - 10) break
+    }
+  } else {
+    for (let i = 0; i < 20; i++) {
+      await page.keyboard.press('ArrowLeft')
+      await page.waitForTimeout(30)
+      const pos = await page.evaluate(() => window.__tatematika!.getCatPosition())
+      if (pos.x <= targetX + 10) break
+    }
+  }
+  
+  // Press Space to jump - action should start
   await page.keyboard.press('Space')
   
-  // Verify action started or completed
+  // Verify action started (cat is jumping or moving toward balloon)
+  await expect.poll(async () => {
+    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+    return jumpState.isJumping
+  }, { timeout: 2000, intervals: [50] }).toBe(true)
+  
+  // Wait for action to complete
+  await expect.poll(async () => {
+    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+    return !jumpState.isJumping
+  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  
+  // Wait for evaluation to complete
+  await expect.poll(async () => {
+    const currentState = await page.evaluate(() => window.__tatematika!.getGameState())
+    return currentState.stars > initialStarsAfterFirst || currentState.wrongAttempts > initialWrongAttemptsAfterFirst
+  }, { timeout: 5000, intervals: [50] }).toBe(true)
+  
+  // Verify exactly +1 star (correct balloon)
   const finalState = await page.evaluate(() => window.__tatematika!.getGameState())
-  expect(finalState.stars >= newState.stars, 'New keyboard input should be accepted').toBe(true)
+  expect(finalState.stars, 'New keyboard input should result in exactly +1 star').toBe(initialStarsAfterFirst + 1)
+  expect(finalState.wrongAttempts, 'Wrong attempts should not increase').toBe(initialWrongAttemptsAfterFirst)
 })
