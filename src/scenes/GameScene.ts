@@ -50,6 +50,7 @@ export class GameScene extends Phaser.Scene {
   private actionLocked: boolean = false
   private actionTargetBalloonId: string | null = null
   private wrongBalloonBounceCompleted: boolean = false
+  private jumpJustCompleted: boolean = false
   private activeAudioContexts: AudioContext[] = []
   private activeOscillators: { oscillator: OscillatorNode, gainNode: GainNode, context: AudioContext }[] = []
   
@@ -781,6 +782,7 @@ export class GameScene extends Phaser.Scene {
     this.actionLocked = false
     this.actionTargetBalloonId = null
     this.wrongBalloonBounceCompleted = false
+    this.jumpJustCompleted = false
     this.catTargetX = this.catX
     this.catY = this.catJumpStartY
     this.drawCat(this.cat, this.catX, this.catY)
@@ -893,6 +895,7 @@ export class GameScene extends Phaser.Scene {
         this.catIsJumping = false
         this.catY = this.catJumpStartY
         this.drawCat(this.cat, this.catX, this.catY)
+        this.jumpJustCompleted = true
       }
     }
     
@@ -957,8 +960,15 @@ export class GameScene extends Phaser.Scene {
       }
     })
     
+    // Defer evaluation to next frame after jump completes (landing phase)
+    // Clear flag and skip evaluation this frame
+    const skipEvaluationThisFrame = this.jumpJustCompleted
+    if (this.jumpJustCompleted) {
+      this.jumpJustCompleted = false
+    }
+    
     // After balloon rendering, check if popping balloon finished and proceed with new round atomically
-    if (poppingBalloonFinishedRendering && !this.catIsJumping && this.popAnimationStartTime > 0) {
+    if (!skipEvaluationThisFrame && poppingBalloonFinishedRendering && !this.catIsJumping && this.popAnimationStartTime > 0) {
       this.popAnimationCompleted = true
       this.popAnimationStartTime = 0
       this.jumpTargetBalloonId = null
@@ -980,7 +990,7 @@ export class GameScene extends Phaser.Scene {
     }
     
     // Handle wrong balloon bounce completion
-    if (this.wrongBalloonBounceCompleted && !this.catIsJumping && this.actionLocked) {
+    if (!skipEvaluationThisFrame && this.wrongBalloonBounceCompleted && !this.catIsJumping && this.actionLocked) {
       this.gameState.round = handleWrongAttempt(this.gameState.round)
       this.updateUI()
       
@@ -1061,6 +1071,7 @@ export class GameScene extends Phaser.Scene {
     this.actionLocked = false
     this.actionTargetBalloonId = null
     this.wrongBalloonBounceCompleted = false
+    this.jumpJustCompleted = false
     this.catY = this.catJumpStartY
     
     this.gameState.round = createRound(settings)
