@@ -49,6 +49,7 @@ export class GameScene extends Phaser.Scene {
   private popAnimationCompleted: boolean = false
   private actionLocked: boolean = false
   private actionTargetBalloonId: string | null = null
+  private landingFrameTime: number = 0
   private activeAudioContexts: AudioContext[] = []
   private activeOscillators: { oscillator: OscillatorNode, gainNode: GainNode, context: AudioContext }[] = []
   
@@ -771,6 +772,7 @@ export class GameScene extends Phaser.Scene {
     this.popAnimationCompleted = false
     this.actionLocked = false
     this.actionTargetBalloonId = null
+    this.landingFrameTime = 0
     this.catTargetX = this.catX
     this.catY = this.catJumpStartY
     this.drawCat(this.cat, this.catX, this.catY)
@@ -883,6 +885,10 @@ export class GameScene extends Phaser.Scene {
         this.catIsJumping = false
         this.catY = this.catJumpStartY
         this.drawCat(this.cat, this.catX, this.catY)
+        // Record landing frame time if we're in an action
+        if (this.actionLocked && this.landingFrameTime === 0) {
+          this.landingFrameTime = time
+        }
       }
     }
     
@@ -900,14 +906,6 @@ export class GameScene extends Phaser.Scene {
           bs.isBouncing = false
           bs.sprite.setY(bs.y)
           bs.text.setY(bs.y)
-          // Check if this is the target balloon that finished bouncing (wrong balloon)
-          if (bs.id === this.jumpTargetBalloonId && this.actionLocked && this.popAnimationStartTime === 0) {
-            // Unlock action after wrong balloon bounce completes
-            this.actionLocked = false
-            this.actionTargetBalloonId = null
-            this.jumpTargetBalloonId = null
-            this.jumpContactMade = false
-          }
         }
       } else if (bs.isPopping && bs.popStartTime) {
         const elapsed = time - bs.popStartTime
@@ -952,7 +950,8 @@ export class GameScene extends Phaser.Scene {
     })
     
     // After balloon rendering, check if popping balloon finished and proceed with new round atomically
-    if (poppingBalloonFinishedRendering && !this.catIsJumping && this.popAnimationStartTime > 0) {
+    // Only process if landing has been active for at least one frame (time > landingFrameTime)
+    if (poppingBalloonFinishedRendering && !this.catIsJumping && this.popAnimationStartTime > 0 && this.landingFrameTime > 0 && time > this.landingFrameTime) {
       this.popAnimationCompleted = true
       this.popAnimationStartTime = 0
       this.jumpTargetBalloonId = null
@@ -968,9 +967,25 @@ export class GameScene extends Phaser.Scene {
         this.updateUI()
       }
       
-      // Unlock action after correct balloon evaluation
+      // Unlock action after correct balloon evaluation (landing phase complete)
       this.actionLocked = false
       this.actionTargetBalloonId = null
+      this.landingFrameTime = 0
+    }
+    
+    // Check for wrong balloon unlock when bounce completed before jump (bounce 300ms < jump 600ms)
+    // This handles the case where bouncing finished while still jumping, so landing phase check is deferred
+    if (this.actionLocked && !this.catIsJumping && this.landingFrameTime > 0 && time > this.landingFrameTime && 
+        this.popAnimationStartTime === 0 && this.jumpTargetBalloonId) {
+      const targetBalloon = this.balloonSprites.find(bs => bs.id === this.jumpTargetBalloonId)
+      if (targetBalloon && !targetBalloon.isBouncing && !targetBalloon.isPopping) {
+        // Wrong balloon bounce completed, landing phase complete, unlock
+        this.actionLocked = false
+        this.actionTargetBalloonId = null
+        this.jumpTargetBalloonId = null
+        this.jumpContactMade = false
+        this.landingFrameTime = 0
+      }
     }
     
   }
@@ -1042,6 +1057,7 @@ export class GameScene extends Phaser.Scene {
     this.popAnimationCompleted = false
     this.actionLocked = false
     this.actionTargetBalloonId = null
+    this.landingFrameTime = 0
     this.catY = this.catJumpStartY
     
     this.gameState.round = createRound(settings)
