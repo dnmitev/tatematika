@@ -601,6 +601,12 @@ export class GameScene extends Phaser.Scene {
 
   private handlePlayAgain() {
     this.levelCompleteUI.hide()
+    this.catIsJumping = false
+    this.catJumpTime = 0
+    this.pendingJumpBalloonId = null
+    this.catTargetX = this.catX
+    this.catY = this.catJumpStartY
+    this.drawCat(this.cat, this.catX, this.catY)
     this.gameState = startNewLevel(this.gameState)
     this.createBalloons()
     this.updateUI()
@@ -720,9 +726,11 @@ export class GameScene extends Phaser.Scene {
           bs.text.setVisible(false)
         }
       } else if (!bs.isPopping) {
-        bs.y += this.balloonSpeed * (delta / 1000)
-        bs.sprite.setPosition(bs.x, bs.y)
-        bs.text.setPosition(bs.x, bs.y)
+        if (!this.catIsJumping) {
+          bs.y += this.balloonSpeed * (delta / 1000)
+          bs.sprite.setPosition(bs.x, bs.y)
+          bs.text.setPosition(bs.x, bs.y)
+        }
 
         if (shouldShowHint(this.gameState.round) && bs.isCorrect) {
           bs.sprite.alpha = 0.7 + Math.sin(time * 0.005) * 0.3
