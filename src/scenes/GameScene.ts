@@ -404,6 +404,24 @@ export class GameScene extends Phaser.Scene {
       ]
     }
     
+    const jumpHeight = 80
+    const catRestingEarsTop = this.catJumpStartY - 40
+    const jumpPeakCatTop = catRestingEarsTop - jumpHeight
+    const balloonRadius = balloonHeight / 2
+    const safetyMargin = 15
+    const maxSafeBalloonBottom = jumpPeakCatTop - safetyMargin
+    
+    const currentLowestBottom = Math.max(...positions.map(p => p.y + balloonRadius))
+    if (currentLowestBottom > maxSafeBalloonBottom) {
+      const shiftNeeded = currentLowestBottom - maxSafeBalloonBottom
+      const currentHighestTop = Math.min(...positions.map(p => p.y - balloonRadius))
+      const targetHighestTop = currentHighestTop - shiftNeeded
+      
+      if (targetHighestTop >= hudTopSpace) {
+        positions = positions.map(p => ({ x: p.x, y: p.y - shiftNeeded }))
+      }
+    }
+    
     this.gameState.round.balloons.forEach((balloon, index) => {
       const { x, y } = positions[index]
 
