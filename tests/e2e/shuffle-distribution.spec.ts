@@ -92,7 +92,7 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
     
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
     const correctBalloon = state.balloons.find((b: any) => b.isCorrect)!
-    const initialBalloonIds = state.balloons.map((b: any) => b.id).sort()
+    const initialTarget = state.round.target
     
     // Get all balloon centerX positions sorted to find slot
     const balloonPositions = await page.evaluate(() => {
@@ -134,7 +134,7 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       const newState = await page.evaluate(() => window.__tatematika!.getGameState())
-      return !jumpState.isJumping && newState.round.target !== state.round.target
+      return !jumpState.isJumping && newState.round.target !== initialTarget
     }, { timeout: 10000, intervals: [50] }).toBe(true)
   }
   
