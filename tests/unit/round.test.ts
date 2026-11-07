@@ -151,7 +151,7 @@ describe('Round Management', () => {
       round = handleWrongAttempt(round)
       
       // When the next moment is shown
-      // Then the correct balloon glows (hint is enabled)
+      // Then the hint is enabled (the view shows a constant outline; see e2e К5)
       expect(shouldShowHint(round)).toBe(true)
       expect(round.wrongAttempts).toBe(2)
     })

@@ -1,5 +1,13 @@
 import { test, expect } from '@playwright/test'
-import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS } from './test-timeouts'
+import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS, multiRoundTestTimeout } from './test-timeouts'
+import {
+  balloonId,
+  describeBalloonStability,
+  readTopPanel,
+  sampleIdleBalloons,
+  visibleWrongSentence,
+  watchBalloonAnswer,
+} from './feedback-observers'
 
 /**
  * E2E tests for "Котето и балоните"
@@ -35,7 +43,7 @@ test.describe('Котето и балоните - E2E', () => {
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   })
 
-  test('К1: Round start - has 3 balloons with target 0-6 and exactly one correct', async ({ page }) => {
+  test('К1: Round start - 3 balloons, top panel „Намери сметката за“ and target 0-6, exactly one correct', async ({ page }) => {
     // К1: Given game started with default settings
     // When new round begins
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
@@ -50,6 +58,17 @@ test.describe('Котето и балоните - E2E', () => {
     // Exactly one balloon is correct
     const correctCount = state.balloons.filter(b => b.isCorrect).length
     expect(correctCount).toBe(1)
+
+    const correct = state.balloons.find(b => b.isCorrect)!
+    expect(correct.formula.length).toBeGreaterThan(0)
+
+    const panel = await readTopPanel(page)
+    expect(panel.formulasOnBalloons, 'К1: each formula stays on its balloon').toBe(true)
+    expect(panel.formulaMovedIntoPanel, 'К1: no formula is moved into the top panel').toBe(false)
+    expect(
+      panel.instructionFound && panel.targetInPanel === state.target,
+      `К1: top panel must show „Намери сметката за“ and target ${state.target} (instruction=${panel.instructionFound}, targetInPanel=${panel.targetInPanel})`
+    ).toBe(true)
   })
 
   test('К3: Correct balloon - pops, sound plays, star added, new round', async ({ page }) => {
@@ -99,52 +118,57 @@ test.describe('Котето и балоните - E2E', () => {
     expect(newState.wrongAttempts).toBe(0)
   })
 
-  test('К4: Wrong balloon - bounces, no star loss, same balloons', async ({ page }) => {
+  test('К4: Wrong balloon - one red X, „Опа!“ sound, bounce, same balloons and target', async ({ page }) => {
+    test.setTimeout(multiRoundTestTimeout(1))
     // К4: Given child is in front of wrong balloon
-    const initialState = await page.evaluate(() => window.__tatematika!.getGameState())
-    const wrongBalloon = initialState.balloons.find(b => !b.isCorrect)!
-    const initialStars = initialState.stars
-    
-    // When cat jumps at it
-    await page.evaluate((id) => window.__tatematika!.clickBalloon(id), wrongBalloon.id)
-    
-    // Wait for bounce animation
-    await page.waitForTimeout(500)
-    
-    const newState = await page.evaluate(() => window.__tatematika!.getGameState())
-    
-    // Then stars don't decrease
-    expect(newState.stars).toBe(initialStars)
-    
-    // Balloons stay the same
-    const newBalloonIds = newState.balloons.map(b => b.id).sort().join(',')
-    const oldBalloonIds = initialState.balloons.map(b => b.id).sort().join(',')
-    expect(newBalloonIds).toBe(oldBalloonIds)
-    
-    // Wrong attempts increased
-    expect(newState.wrongAttempts).toBe(1)
+    const id = await balloonId(page, 'wrong')
+    const watch = await watchBalloonAnswer(page, id)
+
+    // Stars don't decrease and the round stays
+    expect(watch.stateAfter.stars).toBe(watch.stateBefore.stars)
+    expect(watch.stateAfter.target).toBe(watch.stateBefore.target)
+    expect(watch.stateAfter.balloonIds.slice().sort().join(',')).toBe(watch.stateBefore.balloonIds.slice().sort().join(','))
+    expect(watch.stateAfter.wrongAttempts).toBe(watch.stateBefore.wrongAttempts + 1)
+    expect(watch.sawBounce, 'К4: the balloon bounces and does not pop').toBe(true)
+
+    const problems: string[] = []
+    if (watch.maxWrongIcons !== 1) {
+      problems.push(`expected exactly one accessible name „Грешно“ instead of „Опа! Опитай пак!“, saw ${watch.maxWrongIcons}`)
+    }
+    if (visibleWrongSentence(watch.texts)) problems.push('visible text still contains „Опа! Опитай пак!“')
+    if (watch.muted || !watch.sound || !['meow', 'опа', 'opa', 'Опа', 'oops'].includes(watch.sound)) {
+      problems.push(`„Опа!“ did not play with sound on (last=${watch.sound}, muted=${watch.muted})`)
+    }
+    expect(problems, problems.join('\n')).toEqual([])
   })
 
-  test('К5: Hint after 2 wrong attempts - correct balloon glows', async ({ page }) => {
+  test('К5: Hint after 2 wrong attempts - constant outline, readable digits', async ({ page }) => {
+    test.setTimeout(multiRoundTestTimeout(2))
     // К5: Given child made 2 mistakes in one round
-    const initialState = await page.evaluate(() => window.__tatematika!.getGameState())
-    const wrongBalloon = initialState.balloons.find(b => !b.isCorrect)!
-    
-    // First wrong attempt
-    await page.evaluate((id) => window.__tatematika!.clickBalloon(id), wrongBalloon.id)
-    await page.waitForTimeout(300)
-    
-    // Second wrong attempt
-    await page.evaluate((id) => window.__tatematika!.clickBalloon(id), wrongBalloon.id)
-    await page.waitForTimeout(300)
-    
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const id = await balloonId(page, 'wrong')
+      await watchBalloonAnswer(page, id)
+    }
+
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
-    
-    // Then hint is enabled (wrongAttempts >= 2)
     expect(state.wrongAttempts).toBeGreaterThanOrEqual(2)
-    
-    // The correct balloon should be visually indicated (tested via game state)
-    // The developer should implement visual hint when wrongAttempts >= 2
+
+    const watch = await sampleIdleBalloons(page, 1000)
+    const correct = state.balloons.find(b => b.isCorrect)!
+    const font = await page.evaluate(() => window.__tatematika!.getFormulaFontSize())
+    const problems = describeBalloonStability(
+      watch.samples.filter(sample => sample.id === correct.id),
+      'К5 outline'
+    )
+    if (font < 32) problems.push(`formula digits are ${font}px, below 32px`)
+    const correctSamples = watch.samples.filter(sample => sample.id === correct.id)
+    const instances = new Set(correctSamples.map(sample => sample.instanceId))
+    const strokes = new Set(correctSamples.map(sample => sample.stroke))
+    if (instances.size !== 1 || strokes.size !== 1 || correctSamples.some(sample => sample.stroke === null)) {
+      problems.push(`outline is not one constant non-blinking contour (instances=${instances.size}, strokes=${[...strokes].join(',')})`)
+    }
+    if (!watch.texts.includes(correct.formula)) problems.push('digits on the correct balloon are not readable')
+    expect(problems, problems.join('\n')).toEqual([])
   })
 
   test('К7: Level end - shows "Ти успя!" and buttons after 10 stars', async ({ page }) => {
