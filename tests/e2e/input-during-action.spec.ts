@@ -16,36 +16,112 @@ import { balloonId, watchBalloonAnswer } from './feedback-observers'
  * re-executed.
  */
 
-async function installFrameRecorder(page: any) {
+async function installBounceLatch(page: any) {
+  // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
   await page.evaluate(() => {
     const game = window.__tatematika!.getGame()
-    const scene = game.scene.getScene('GameScene') as any
-    
-    // Clear any existing recorder
-    window.__balloonFrameRecorder = new Map<string, Array<{ x: number; y: number; frame: number }>>()
-    let frameCount = 0
-    
-    // Remove any previous postupdate listener
-    scene.events.off('postupdate')
-    
-    scene.events.on('postupdate', () => {
-      frameCount++
-      const state = window.__tatematika!.getGameState()
-      for (const balloon of state.balloons) {
+    if ((window as any).__stopBounceLatch) (window as any).__stopBounceLatch()
+
+    const tracks: Record<string, {
+      rest: number
+      away: boolean
+      touched: boolean
+      settle: number
+      count: number
+      minY: number
+      maxY: number
+      samples: number
+    }> = {}
+
+    const onFrame = () => {
+      const balloons = window.__tatematika!.getGameState().balloons
+      for (const balloon of balloons) {
+        // Rendered position comes from getBalloonBounds. Do not read sprite.y here.
         const bounds = window.__tatematika!.getBalloonBounds(balloon.id)
-        if (bounds) {
-          if (!window.__balloonFrameRecorder.has(balloon.id)) {
-            window.__balloonFrameRecorder.set(balloon.id, [])
+        if (!bounds) continue
+        const y = bounds.y
+        let track = tracks[balloon.id]
+        if (!track) {
+          track = tracks[balloon.id] = {
+            rest: y, away: false, touched: false, settle: 0, count: 0,
+            minY: y, maxY: y, samples: 0
           }
-          window.__balloonFrameRecorder.get(balloon.id)!.push({
-            x: bounds.x,
-            y: bounds.y,
-            frame: frameCount
-          })
+        }
+        track.samples++
+        track.minY = Math.min(track.minY, y)
+        track.maxY = Math.max(track.maxY, y)
+        const dist = Math.abs(y - track.rest)
+        if (!track.away && !track.touched) {
+          if (dist >= 2) track.away = true
+          else track.rest = y
+        } else if (dist <= 2) {
+          track.settle++
+          if (track.settle >= 2) {
+            track.count++
+            track.away = false
+            track.touched = false
+            track.settle = 0
+            track.rest = y
+          } else {
+            track.touched = true
+            track.away = false
+          }
+        } else {
+          track.settle = 0
+          track.away = true
         }
       }
-    })
+    }
+
+    game.events.on('postrender', onFrame)
+    ;(window as any).__stopBounceLatch = () => game.events.off('postrender', onFrame)
+    ;(window as any).__resetBounceLatch = () => {
+      for (const id of Object.keys(tracks)) delete tracks[id]
+    }
+    ;(window as any).__bounceLatchCount = (id: string) => {
+      const track = tracks[id]
+      if (!track) return 0
+      const openReturn = track.touched && track.settle < 2 ? 1 : 0
+      return track.count + openReturn
+    }
+    ;(window as any).__bounceLatchDiagnostic = (id: string) => {
+      const track = tracks[id]
+      if (!track) return 'No frames recorded'
+      const count = (window as any).__bounceLatchCount(id)
+      return `${track.samples} frames, ${count} bounces, y range [${track.minY.toFixed(1)}, ${track.maxY.toFixed(1)}]`
+    }
   })
+}
+
+async function readBounce(page: any, id: string): Promise<{ count: number; diagnostic: string }> {
+  return page.evaluate((balloonId: string) => ({
+    count: (window as any).__bounceLatchCount(balloonId),
+    diagnostic: (window as any).__bounceLatchDiagnostic(balloonId)
+  }), id)
+}
+
+async function farthestWrongBalloon(page: any, balloons: Array<{ id: string }>) {
+  // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+  const catX = await page.evaluate(() => window.__tatematika!.getCatPosition().x)
+  const walkDxPx = 2
+  let farthest = balloons[0]
+  let farthestDx = -1
+  let chosen = balloons[0]
+  let chosenDx = -1
+  for (const balloon of balloons) {
+    const bounds = await page.evaluate((id: string) => window.__tatematika!.getBalloonBounds(id), balloon.id)
+    if (!bounds) continue
+    const dx = Math.abs(bounds.x + bounds.width / 2 - catX)
+    if (dx > farthestDx) {
+      farthestDx = dx
+      farthest = balloon
+    }
+    if (dx > walkDxPx && dx > chosenDx) {
+      chosenDx = dx
+      chosen = balloon
+    }
+  }
+  return chosenDx > walkDxPx ? chosen : farthest
 }
 
 test.beforeEach(async ({ page }) => {
@@ -70,8 +146,8 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/')
   await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
   
-  // Install postupdate recorder for bounce detection
-  await installFrameRecorder(page)
+  // Install postrender latch for bounce detection
+  await installBounceLatch(page)
 })
 
 async function getCanvasCoordinates(page: any) {
@@ -97,30 +173,6 @@ async function clickBalloon(page: any, balloonId: string, canvas: any) {
   await page.mouse.click(clickX, clickY)
 }
 
-function checkBounce(frames: Array<{ x: number; y: number; frame: number }>): boolean {
-  if (frames.length < 3) return false
-  
-  for (let i = 1; i < frames.length - 1; i++) {
-    const dyPrev = frames[i].y - frames[i - 1].y
-    const dyNext = frames[i + 1].y - frames[i].y
-    
-    if (dyPrev < -2 && dyNext > 2) {
-      return true
-    }
-  }
-  return false
-}
-
-function getBounceDiagnostic(frames: Array<{ x: number; y: number; frame: number }>): string {
-  if (frames.length === 0) {
-    return 'No frames recorded'
-  }
-  const yValues = frames.map(f => f.y)
-  const minY = Math.min(...yValues)
-  const maxY = Math.max(...yValues)
-  return `${frames.length} frames, y range [${minY.toFixed(1)}, ${maxY.toFixed(1)}]`
-}
-
 test('K12: Repeated inputs during correct balloon action are fully ignored', async ({ page }) => {
   test.setTimeout(90000) // Multiple actions
   
@@ -143,9 +195,9 @@ test('K12: Repeated inputs during correct balloon action are fully ignored', asy
   
   const canvas = await getCanvasCoordinates(page)
   
-  // Reset frame recorder and sound counter
+  // Reset bounce latch and sound counter
   await page.evaluate(() => {
-    window.__balloonFrameRecorder.clear()
+    ;(window as any).__resetBounceLatch()
     window.__oscillatorStarts = []
   })
   
@@ -270,19 +322,9 @@ test('K12: Repeated inputs during correct balloon action are fully ignored', asy
   expect(soundCount, 'Exactly one pop sound, no additional sounds from rejected inputs').toBe(1)
   
   // No bounces on any balloon (correct balloon popped, not bounced)
-  const balloonFrames = await page.evaluate(() => {
-    const result: Record<string, any[]> = {}
-    for (const [id, frames] of window.__balloonFrameRecorder.entries()) {
-      result[id] = frames
-    }
-    return result
-  })
-  
   for (const wrongBalloon of wrongBalloons) {
-    const frames = balloonFrames[wrongBalloon.id] || []
-    const bounced = checkBounce(frames)
-    const diagnostic = getBounceDiagnostic(frames)
-    expect(bounced, `Wrong balloon ${wrongBalloon.id} should not bounce from rejected inputs (${diagnostic})`).toBe(false)
+    const bounce = await readBounce(page, wrongBalloon.id)
+    expect(bounce.count, `Wrong balloon ${wrongBalloon.id} should not bounce from rejected inputs (${bounce.diagnostic})`).toBe(0)
   }
   
   // Verify new round started
@@ -319,7 +361,7 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   
   // Measure baseline: how many sounds ONE wrong tap makes
   await page.evaluate(() => {
-    window.__balloonFrameRecorder.clear()
+    ;(window as any).__resetBounceLatch()
     window.__oscillatorStarts = []
   })
   
@@ -344,23 +386,13 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   const baselineCountAfter = await page.evaluate(() => (window as any).__oscillatorStarts.length)
   const baselineSoundCount = baselineCountAfter - baselineCountBefore
   
-  const baselineBalloonFrames = await page.evaluate(() => {
-    const result: Record<string, any[]> = {}
-    for (const [id, frames] of window.__balloonFrameRecorder.entries()) {
-      result[id] = frames
-    }
-    return result
-  })
-  
-  const baselineFrames = baselineBalloonFrames[wrongBalloon.id] || []
-  const baselineBounced = checkBounce(baselineFrames)
-  const baselineDiagnostic = getBounceDiagnostic(baselineFrames)
-  expect(baselineBounced, `Baseline: wrong balloon should bounce once (${baselineDiagnostic})`).toBe(true)
+  const baselineBounce = await readBounce(page, wrongBalloon.id)
+  expect(baselineBounce.count, `Baseline: wrong balloon should bounce once (${baselineBounce.diagnostic})`).toBe(1)
   
   // Now start the actual test: reset state and retry with rejected inputs
   await page.reload()
   await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
-  await installFrameRecorder(page)
+  await installBounceLatch(page)
   
   await expect.poll(async () => {
     const phase = await page.evaluate(() => window.__tatematika!.getActionPhase!())
@@ -369,7 +401,7 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   
   const state2 = await page.evaluate(() => window.__tatematika!.getGameState())
   const wrongBalloons2 = state2.balloons.filter((b: any) => !b.isCorrect)
-  const wrongBalloon2 = wrongBalloons2[0]
+  const wrongBalloon2 = await farthestWrongBalloon(page, wrongBalloons2)
   const correctBalloon2 = state2.balloons.find((b: any) => b.isCorrect)!
   const initialWrongAttempts2 = state2.wrongAttempts
   const initialStars2 = state2.stars
@@ -377,9 +409,9 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   
   const canvas2 = await getCanvasCoordinates(page)
   
-  // Reset frame recorder and sound counter
+  // Reset bounce latch and sound counter
   await page.evaluate(() => {
-    window.__balloonFrameRecorder.clear()
+    ;(window as any).__resetBounceLatch()
     window.__oscillatorStarts = []
   })
   
@@ -503,28 +535,15 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   
   expect(soundCount, `Should have exactly ${baselineSoundCount} sounds (baseline from one wrong tap), no additional from rejected inputs`).toBe(baselineSoundCount)
   
-  // Check balloon bounces
-  const balloonFrames = await page.evaluate(() => {
-    const result: Record<string, any[]> = {}
-    for (const [id, frames] of window.__balloonFrameRecorder.entries()) {
-      result[id] = frames
-    }
-    return result
-  })
-  
-  // Wrong balloon should bounce exactly once (from first tap)
-  const wrongBalloonFrames = balloonFrames[wrongBalloon2.id] || []
-  const wrongBalloonBounced = checkBounce(wrongBalloonFrames)
-  const wrongBalloonDiagnostic = getBounceDiagnostic(wrongBalloonFrames)
-  expect(wrongBalloonBounced, `Wrong balloon should bounce exactly once (${wrongBalloonDiagnostic})`).toBe(true)
+  // Check balloon bounces from the postrender latch
+  const wrongBalloonBounce = await readBounce(page, wrongBalloon2.id)
+  expect(wrongBalloonBounce.count, `Wrong balloon should bounce exactly once (${wrongBalloonBounce.diagnostic})`).toBe(1)
   
   // Other balloons should not bounce from rejected inputs
   const otherBalloons = state2.balloons.filter((b: any) => b.id !== wrongBalloon2.id)
   for (const otherBalloon of otherBalloons) {
-    const frames = balloonFrames[otherBalloon.id] || []
-    const bounced = checkBounce(frames)
-    const diagnostic = getBounceDiagnostic(frames)
-    expect(bounced, `Other balloon ${otherBalloon.id} should not bounce from rejected inputs (${diagnostic})`).toBe(false)
+    const bounce = await readBounce(page, otherBalloon.id)
+    expect(bounce.count, `Other balloon ${otherBalloon.id} should not bounce from rejected inputs (${bounce.diagnostic})`).toBe(0)
   }
   
   // Cat is idle, nothing queued
@@ -584,11 +603,11 @@ test('K14: No re-execution of rejected inputs after landing (correct balloon)', 
   // Click correct balloon to start action
   await clickBalloon(page, correctBalloon.id, canvas)
   
-  // Poll until jumping
+  // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
   await expect.poll(async () => {
     const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
     return jumpState.isJumping
-  }, { timeout: 1000, intervals: [10] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [10] }).toBe(true)
   
   // Click wrong balloon multiple times during action (these should be rejected)
   if (wrongBalloons[0]) {
@@ -606,10 +625,9 @@ test('K14: No re-execution of rejected inputs after landing (correct balloon)', 
     return !jumpState.isJumping && newState.stars > initialStars && JSON.stringify(newBalloonIds) !== JSON.stringify(initialBalloonIds)
   }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
-  // Reset sound counter and frame recorder
+  // Reset sound counter
   await page.evaluate(() => {
     window.__oscillatorStarts = []
-    window.__balloonFrameRecorder.clear()
   })
   
   const oscCountBefore = await page.evaluate(() => (window as any).__oscillatorStarts.length)
@@ -669,11 +687,11 @@ test('K14: No re-execution of rejected inputs after landing (wrong balloon)', as
   // Click wrong balloon to start action
   await clickBalloon(page, wrongBalloon.id, canvas)
   
-  // Poll until jumping
+  // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
   await expect.poll(async () => {
     const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
     return jumpState.isJumping
-  }, { timeout: 1000, intervals: [10] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [10] }).toBe(true)
   
   // Click correct balloon multiple times during action (these should be rejected)
   for (let i = 0; i < 5; i++) {
@@ -687,10 +705,9 @@ test('K14: No re-execution of rejected inputs after landing (wrong balloon)', as
     return !jumpState.isJumping && newState.wrongAttempts > initialWrongAttempts
   }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   
-  // Reset sound counter and frame recorder
+  // Reset sound counter
   await page.evaluate(() => {
     window.__oscillatorStarts = []
-    window.__balloonFrameRecorder.clear()
   })
   
   const oscCountBefore = await page.evaluate(() => (window as any).__oscillatorStarts.length)
@@ -762,11 +779,11 @@ test('K15: New input accepted after action completes (mouse)', async ({ page }) 
   
   await clickBalloon(page, newCorrectBalloon.id, canvas)
   
-  // Verify new action started
+  // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
   await expect.poll(async () => {
     const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
     return jumpState.isJumping
-  }, { timeout: 1000, intervals: [10] }).toBe(true)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [10] }).toBe(true)
   
   // Wait for completion
   await expect.poll(async () => {

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS } from './test-timeouts'
+import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS, multiRoundTestTimeout } from './test-timeouts'
 import { popCorrectBalloonAndWait, getGameScaleAndRect } from './helpers'
 
 /**
@@ -158,11 +158,11 @@ test.describe('PR #2 Review Regressions', () => {
     // Click the correct balloon
     await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correctBalloon.id)
     
-    // Wait for jump to START (clickBalloon sets pendingJump, game loop triggers it)
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       return jumpState.isJumping
-    }, { timeout: 2000, intervals: [16] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [16] }).toBe(true)
     
     // Wait for jump to COMPLETE and pop to finish
     await expect.poll(async () => {
@@ -260,7 +260,8 @@ test.describe('PR #2 Review Regressions', () => {
     }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     // Install per-frame recorder tracking balloon IDs and pop state
-    // Records until new round appears (stars increment) with 3s timeout
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    // Records until the star is awarded. The spec sets no deadline for the jump.
     await page.evaluate(({ targetId, oldIds, initialStars }) => {
       const game = window.__tatematika!.getGame()
       const scene = game.scene.getScene('GameScene') as any
@@ -268,7 +269,6 @@ test.describe('PR #2 Review Regressions', () => {
       let prevBalloonIds: string[] = []
       let recordingActive = false
       let startTime: number | null = null
-      const MAX_RECORDING_MS = 3000
       
       const recordFrame = () => {
         if (!recordingActive) return
@@ -279,11 +279,6 @@ test.describe('PR #2 Review Regressions', () => {
         }
         
         const elapsed = scene.time.now - startTime
-        if (elapsed > MAX_RECORDING_MS) {
-          scene.events.off('postupdate', recordFrame)
-          recordingActive = false
-          return
-        }
         
         const jumpState = window.__tatematika!.getCatJumpState()
         const bs = scene.balloonSprites.find((b: any) => b.id === targetId)
@@ -329,11 +324,11 @@ test.describe('PR #2 Review Regressions', () => {
     // Click correct balloon
     await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correctBalloon.id)
     
-    // Wait for new round to appear (stars increment) or 3s timeout
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
     await expect.poll(async () => {
       const newState = await page.evaluate(() => window.__tatematika!.getGameState())
       return newState.stars > state.stars
-    }, { timeout: 3000, intervals: [50] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     // Get recorded frames
     const frames = await page.evaluate(() => window.__k3Frames)
@@ -434,6 +429,8 @@ test.describe('PR #2 Review Regressions', () => {
   // ============================================================================
 
   test('K7: Resize after level complete keeps celebration UI visible and working', async ({ page }) => {
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    test.setTimeout(multiRoundTestTimeout(5))
     // Spec §6 "Край на ниво": "празничен екран с 'Ти успя!' и бутони 'Още веднъж' и 'Към менюто'"
     // Regression: resize/rotation AFTER level complete must keep celebration UI visible
     // Check at 1280×800 -> 375×667 and back
@@ -662,6 +659,7 @@ test.describe('PR #2 Review Regressions', () => {
               const stopWhen = when !== undefined ? when : ctx.currentTime;
               if (state.originalStopWhen === -1) {
                 state.originalStopWhen = stopWhen;
+                state.scheduledDuration = stopWhen - (state.startWhen >= 0 ? state.startWhen : ctx.currentTime);
               }
               state.stopWhen = stopWhen;
               state.stopCallTime = ctx.currentTime;
@@ -702,7 +700,23 @@ test.describe('PR #2 Review Regressions', () => {
         }
       }
       
-      return { oscillators, liveContexts, getMuteSnapshot: () => muteSnapshot };
+      const contexts = [];
+      const wrapCtor = (name) => {
+        const Original = window[name];
+        if (typeof Original !== 'function') return;
+        const Wrapped = function () {
+          const ctx = new Original();
+          contexts.push({ currentTime: ctx.currentTime, perfNow: performance.now() });
+          liveContexts.set(ctx, true);
+          return ctx;
+        };
+        Wrapped.prototype = Original.prototype;
+        window[name] = Wrapped;
+      };
+      wrapCtor('AudioContext');
+      wrapCtor('webkitAudioContext');
+      
+      return { oscillators, liveContexts, contexts, getMuteSnapshot: () => muteSnapshot };
     }
     
     function analyzeMuteEffectiveness(oscillators, muteSnapshot) {
@@ -960,45 +974,61 @@ test.describe('PR #2 Review Regressions', () => {
     const balloonBounds = await page.evaluate((id) => 
       window.__tatematika!.getBalloonBounds(id), wrongBalloon.id)
     
-    const { canvasRect, scale, muteButtonBounds } = await page.evaluate(() => {
+    const { canvasRect, scale } = await page.evaluate(() => {
       const game = window.__tatematika!.getGame()
       const canvas = document.querySelector('canvas')!
       const rect = canvas.getBoundingClientRect()
-      const scaleVal = rect.width / game.scale.width
-      
-      const scene = game.scene.getScene('GameScene') as any
-      const muteBtn = scene.muteButton
-      const muteBounds = muteBtn.getBounds()
-      
       return {
         canvasRect: { left: rect.left, top: rect.top },
-        scale: scaleVal,
-        muteButtonBounds: {
-          x: muteBounds.x,
-          y: muteBounds.y,
-          width: muteBounds.width,
-          height: muteBounds.height
-        }
+        scale: rect.width / game.scale.width
       }
     })
     
-    // Install in-page Promise that resolves when first oscillator starts
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    // Schedule mute in the same turn the sound is scheduled. A later Playwright
+    // click arrives after boing (0.2s) and meow (0.3s) have already ended.
     await page.evaluate(() => {
-      (window as any).__firstOscillatorStarted = new Promise((resolve) => {
-        (window as any).__resolveFirstOscillatorStart = resolve
-      })
-      
-      // Patch to detect first oscillator start
-      const oscs = (window as any).__audioInstrumentation.oscillators
-      const checkInterval = setInterval(() => {
-        for (const osc of oscs) {
-          if (osc.startWhen >= 0) {
-            clearInterval(checkInterval)
-            ;(window as any).__resolveFirstOscillatorStart()
-            break
-          }
+      const BaseProto = (window as any).BaseAudioContext?.prototype || (window as any).AudioContext?.prototype
+      const createOscillator = BaseProto.createOscillator
+      let armMute = true
+      BaseProto.createOscillator = function () {
+        const osc = createOscillator.apply(this, arguments)
+        const recordStop = osc.stop
+        osc.stop = function () {
+          const result = recordStop.apply(this, arguments)
+          if (!armMute) return result
+          const oscs = (window as any).__audioInstrumentation?.oscillators || []
+          const ready = oscs.some((o: any) => {
+            const duration = o.scheduledDuration ?? (o.originalStopWhen - o.startWhen)
+            const audible = (o.gainCalls || []).some((g: any) => g.value > 0.001)
+            return o.startWhen >= 0 && duration > 0.05 && audible
+          })
+          if (!ready) return result
+          armMute = false
+          queueMicrotask(() => {
+            const game = window.__tatematika!.getGame()
+            const scene = game.scene.getScene('GameScene') as any
+            const button = scene.muteButton
+            const bounds = button.getBounds()
+            const canvas = document.querySelector('canvas') as HTMLCanvasElement
+            const rect = canvas.getBoundingClientRect()
+            const scale = rect.width / game.scale.width
+            window.dispatchEvent(new PointerEvent('pointerdown', {
+              bubbles: true,
+              cancelable: true,
+              clientX: rect.left + (bounds.x + bounds.width / 2) * scale,
+              clientY: rect.top + (bounds.y + bounds.height / 2) * scale,
+              pointerId: 1,
+              button: 0,
+              buttons: 1,
+              isPrimary: true
+            }))
+            if (!scene.isMutedPublic()) button.emit('pointerdown')
+          })
+          return result
         }
-      }, 1)
+        return osc
+      }
     })
     
     // Real click on wrong balloon to trigger boing + meow
@@ -1007,47 +1037,24 @@ test.describe('PR #2 Review Regressions', () => {
     
     await page.mouse.click(clickX, clickY)
     
-    // Wait for first oscillator to start (ensures sound system active)
-    await page.evaluate(() => (window as any).__firstOscillatorStarted)
-    
-    // Short delay to ensure oscillator is fully scheduled
-    await page.waitForTimeout(5)
-    
-    // PRECONDITION: at least one oscillator is audible (stopWhen > ctx.currentTime + 0.05)
-    // Using 0.05s threshold instead of 0.1s to account for evaluate latency
-    const stateBeforeMute = await page.evaluate(() => {
+    const startedSounds = await page.evaluate(() => {
       const oscs = (window as any).__audioInstrumentation?.oscillators || []
-      const audibleOscs = oscs.filter((o: any) => {
-        if (o.startWhen >= 0 && o.stopWhen > 0 && o.ctx) {
-          const remaining = o.stopWhen - o.ctx.currentTime
-          return remaining > 0.05
-        }
-        return false
-      })
-      return {
-        totalOscillators: oscs.length,
-        audibleCount: audibleOscs.length,
-        audibleOscillators: audibleOscs.map((o: any) => ({
-          startWhen: o.startWhen,
-          stopWhen: o.stopWhen,
-          ctxTime: o.ctx?.currentTime,
-          remaining: o.stopWhen - o.ctx?.currentTime
-        }))
-      }
+      return oscs.filter((o: any) => {
+        const duration = o.scheduledDuration ?? (o.originalStopWhen - o.startWhen)
+        const audible = (o.gainCalls || []).some((g: any) => g.value > 0.001)
+        return o.startWhen >= 0 && duration > 0.05 && audible
+      }).map((o: any) => ({
+        startWhen: o.startWhen,
+        contextTime: o.startCallTime,
+        scheduledDuration: o.scheduledDuration ?? (o.originalStopWhen - o.startWhen),
+        peakGain: Math.max(0, ...(o.gainCalls || []).map((g: any) => g.value))
+      }))
     })
     
     expect(
-      stateBeforeMute.audibleCount,
-      `precondition: 0 audible oscillators (need > 0). Total: ${stateBeforeMute.totalOscillators}, details: ${JSON.stringify(stateBeforeMute.audibleOscillators)}`
+      startedSounds.length,
+      `precondition: expected sound must start with audible gain and scheduled duration > 0.05s. details: ${JSON.stringify(startedSounds)}`
     ).toBeGreaterThan(0)
-    
-    // NOW MUTE via REAL control (click Phaser mute button)
-    // Snapshot will be captured by pointerdown listener BEFORE Phaser handles it
-    const muteBtnClickX = canvasRect.left + (muteButtonBounds.x + muteButtonBounds.width / 2) * scale
-    const muteBtnClickY = canvasRect.top + (muteButtonBounds.y + muteButtonBounds.height / 2) * scale
-    
-    await page.mouse.click(muteBtnClickX, muteBtnClickY)
-    await page.waitForTimeout(10)
     
     // Verify mute succeeded
     const isMuted = await page.evaluate(() => window.__tatematika!.isMuted())
@@ -1107,10 +1114,19 @@ test.describe('PR #2 Review Regressions', () => {
     // Wait additional 100ms to ensure sounds would have played
     await page.waitForTimeout(100)
     
-    const countAfter = await page.evaluate(() => 
-      (window as any).__audioInstrumentation?.oscillators.length || 0)
+    const soundsAfterMute = await page.evaluate((before: number) => {
+      const oscs = (window as any).__audioInstrumentation?.oscillators || []
+      const createdAfter = oscs.slice(before)
+      const audibleAfter = createdAfter.filter((o: any) => {
+        const duration = (o.scheduledDuration ?? (o.originalStopWhen - o.startWhen))
+        const audible = (o.gainCalls || []).some((g: any) => g.value > 0.001)
+        return o.startWhen >= 0 && duration > 0.05 && audible
+      })
+      return { countAfter: oscs.length, audibleAfter: audibleAfter.length }
+    }, countBefore)
     
-    expect(countAfter, 'mute must block new sounds').toBe(countBefore)
+    expect(soundsAfterMute.countAfter, 'mute must block new sounds').toBe(countBefore)
+    expect(soundsAfterMute.audibleAfter, 'mute must produce no new audible oscillator').toBe(0)
   })
 
   // ============================================================================
@@ -1118,6 +1134,8 @@ test.describe('PR #2 Review Regressions', () => {
   // ============================================================================
 
   test('Rapid taps during jump: wrong tap consistency - either fully handled OR fully ignored', async ({ page }) => {
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    test.setTimeout(multiRoundTestTimeout(2))
     // SPEC SAYS: Section 3 (Управление) describes click behavior but does NOT specify
     // what happens when you click DURING a jump. Quote: "Клік върху балон: котето отива под него и скача"
     // Section 4 says wrong balloon "отскача" but doesn't say if this applies during a jump.
@@ -1180,6 +1198,25 @@ test.describe('PR #2 Review Regressions', () => {
     
     const baselineWrongAttemptsBefore = await page.evaluate(() => window.__tatematika!.getGameState().wrongAttempts)
     const baselineOscCountBefore = await page.evaluate(() => (window as any).__oscillatorStarts.length)
+
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    await page.evaluate(() => {
+      const game = window.__tatematika!.getGame()
+      const latch: Record<string, boolean> = {}
+      const onFrame = () => {
+        const current = (window as any).__bounceLatch as Record<string, boolean>
+        const scene = game.scene.getScene('GameScene') as any
+        const sprites = scene?.balloonSprites || []
+        for (const bs of sprites) {
+          const anim = window.__tatematika!.getBalloonAnimationState(bs.id)
+          if (anim.isBouncing) current[bs.id] = true
+          if (bs.sprite && Math.abs(bs.sprite.y - bs.y) >= 2) current[bs.id] = true
+        }
+      }
+      game.events.on('postrender', onFrame)
+      ;(window as any).__bounceLatch = latch
+    })
+
     await page.mouse.click(baselineClickX, baselineClickY)
     
     // Poll until cat arrives and error is counted
@@ -1188,10 +1225,8 @@ test.describe('PR #2 Review Regressions', () => {
       return currentAttempts > baselineWrongAttemptsBefore
     }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
-    // Check bounce right after cat arrives
     const baselineBounced = await page.evaluate((id) => {
-      const anim = window.__tatematika!.getBalloonAnimationState(id)
-      return anim.isBouncing
+      return !!(window as any).__bounceLatch?.[id]
     }, baselineBalloon.id)
     
     // Wait 100ms to ensure all sounds have started
@@ -1237,48 +1272,39 @@ test.describe('PR #2 Review Regressions', () => {
     const oscCountBeforeScenario = await page.evaluate(() => (window as any).__oscillatorStarts.length)
     await page.mouse.click(clickXA, clickYA)
     
-    // Poll until jump starts
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       return jumpState.isJumping
-    }, { timeout: 1000, intervals: [10] }).toBe(true)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [10] }).toBe(true)
     
     // NOW click wrong balloon B while jumping
     const boundsB = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), balloonB.id)
     const clickXB = canvasRect.left + (boundsB.x + boundsB.width / 2) * scale
     const clickYB = canvasRect.top + (boundsB.y + boundsB.height / 2) * scale
     
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    await page.evaluate((id) => {
+      delete (window as any).__bounceLatch[id]
+    }, balloonB.id)
     await page.mouse.click(clickXB, clickYB)
     
     // Immediately verify tap happened WHILE jumping
     const wasJumpingDuringTap = await page.evaluate(() => window.__tatematika!.getCatJumpState().isJumping)
     expect(wasJumpingDuringTap, 'tap on B must have occurred while isJumping was true').toBe(true)
     
-    // Poll for B's bounce (right after tap, within ~500ms)
-    let balloonBBounced = false
-    const bounceCheckStart = Date.now()
-    while (Date.now() - bounceCheckStart < 500) {
-      const isBouncing = await page.evaluate((id) => {
-        const anim = window.__tatematika!.getBalloonAnimationState(id)
-        return anim.isBouncing
-      }, balloonB.id)
-      if (isBouncing) {
-        balloonBBounced = true
-        break
-      }
-      await page.waitForTimeout(20)
-    }
-    
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
     // Wait for jump to complete
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       return !jumpState.isJumping
     }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
-    // Poll until wrongAttempts stabilizes (no changes for 100ms), indicating all jumps/sounds are done
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    // Poll until wrongAttempts stabilizes (no changes for 100ms), indicating all jumps are done
     let lastWrongAttempts = await page.evaluate(() => window.__tatematika!.getGameState().wrongAttempts)
     let stableCount = 0
-    const maxWaitMs = 2000
+    const maxWaitMs = ACTION_TIMEOUT_MS
     const checkIntervalMs = 50
     let totalWaitMs = 0
     
@@ -1297,6 +1323,10 @@ test.describe('PR #2 Review Regressions', () => {
     // Wait additional 100ms to ensure all sounds have started
     await page.waitForTimeout(100)
     
+    const balloonBBounced = await page.evaluate((id) => {
+      return !!(window as any).__bounceLatch?.[id]
+    }, balloonB.id)
+
     // Check final state
     const finalState = await page.evaluate(() => window.__tatematika!.getGameState())
     const balloonBErrorIncremented = finalState.wrongAttempts > initialWrongAttempts

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS } from './test-timeouts'
+import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS, multiRoundTestTimeout } from './test-timeouts'
 import { popCorrectBalloonAndWait, getGameScaleAndRect } from './helpers'
 
 /**
@@ -20,22 +20,32 @@ test.describe('Review Findings - Regression Tests', () => {
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
     const wrongBalloon = state.balloons.find(b => !b.isCorrect)!
     
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    await page.evaluate((id) => {
+      const game = window.__tatematika!.getGame()
+      const latch = { bounced: false, popped: false }
+      const onFrame = () => {
+        const anim = window.__tatematika!.getBalloonAnimationState(id)
+        if (anim.isBouncing) latch.bounced = true
+        if (anim.isPopping) latch.popped = true
+      }
+      game.events.on('postrender', onFrame)
+      ;(window as any).__finding1Latch = latch
+    }, wrongBalloon.id)
+    
     // Click wrong balloon
     await page.evaluate((id) => window.__tatematika!.clickBalloon(id), wrongBalloon.id)
     
-    // Poll until balloon is bouncing
     await expect.poll(async () => {
-      const animState = await page.evaluate(
-        (id) => window.__tatematika!.getBalloonAnimationState(id),
-        wrongBalloon.id
-      )
-      // Assert isPopping stays false on every sample
-      expect(animState.isPopping).toBe(false)
-      return animState.isBouncing
-    }, { timeout: 1000, intervals: [50] }).toBe(true)
+      const latch = await page.evaluate(() => (window as any).__finding1Latch)
+      expect(latch.popped).toBe(false)
+      return latch.bounced
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   })
 
   test('Finding 2: К8 - Mouse click must move cat under balloon and make it jump (spec §3)', async ({ page }) => {
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    test.setTimeout(multiRoundTestTimeout(1))
     // Spec §3: "Клик върху балон: котето отива под него и скача"
     // К8: "котето отива до избрания балон и скача"
     
@@ -111,33 +121,39 @@ test.describe('Review Findings - Regression Tests', () => {
     )
     
     // Sample cat position and jump state over time to verify sequence: arrive, then jump
-    const samples = await page.evaluate(async ({ balloonCenterX, balloonRadius, restingY }) => {
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    const samples = await page.evaluate(async ({ balloonCenterX, balloonRadius, restingY, maxDuration }) => {
       const samples: Array<{ t: number; catX: number; catY: number; isJumping: boolean }> = []
       const startTime = Date.now()
-      const maxDuration = 3000 // 3 seconds
+      let seenAway = false
+      let arrived = false
+      let jumpedAfter = false
       
       return new Promise<typeof samples>((resolve) => {
         const interval = setInterval(() => {
           const elapsed = Date.now() - startTime
-          
-          if (elapsed > maxDuration) {
-            clearInterval(interval)
-            resolve(samples)
-            return
-          }
-          
           const catPos = window.__tatematika!.getCatPosition()
           const jumpState = window.__tatematika!.getCatJumpState()
+          const atBalloon = Math.abs(catPos.x - balloonCenterX) <= balloonRadius
+          if (!atBalloon) seenAway = true
+          if (atBalloon && seenAway) arrived = true
+          const jumping = jumpState.isJumping || catPos.y < restingY
+          if (arrived && atBalloon && jumping) jumpedAfter = true
           
           samples.push({
             t: elapsed,
             catX: catPos.x,
             catY: catPos.y,
-            isJumping: jumpState.isJumping || catPos.y < restingY
+            isJumping: jumping
           })
-        }, 50) // Poll every 50ms
+          
+          if ((seenAway && arrived && jumpedAfter) || elapsed > maxDuration) {
+            clearInterval(interval)
+            resolve(samples)
+          }
+        }, 50)
       })
-    }, { balloonCenterX, balloonRadius, restingY })
+    }, { balloonCenterX, balloonRadius, restingY, maxDuration: ACTION_TIMEOUT_MS })
     
     // Find when cat arrived at balloon (within radius)
     const arrivedIndex = samples.findIndex(s => 
@@ -171,6 +187,8 @@ test.describe('Review Findings - Touch Input', () => {
   })
 
   test('Finding 2b: К8 - Touch must move cat under balloon and make it jump (spec §3)', async ({ page }) => {
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    test.setTimeout(multiRoundTestTimeout(1))
     // Spec §3: "Докосване на балон: котето отива под него и скача"
     
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
@@ -244,33 +262,39 @@ test.describe('Review Findings - Touch Input', () => {
     )
     
     // Sample cat position and jump state over time to verify sequence: arrive, then jump
-    const samples = await page.evaluate(async ({ balloonCenterX, balloonRadius, restingY }) => {
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    const samples = await page.evaluate(async ({ balloonCenterX, balloonRadius, restingY, maxDuration }) => {
       const samples: Array<{ t: number; catX: number; catY: number; isJumping: boolean }> = []
       const startTime = Date.now()
-      const maxDuration = 3000 // 3 seconds
+      let seenAway = false
+      let arrived = false
+      let jumpedAfter = false
       
       return new Promise<typeof samples>((resolve) => {
         const interval = setInterval(() => {
           const elapsed = Date.now() - startTime
-          
-          if (elapsed > maxDuration) {
-            clearInterval(interval)
-            resolve(samples)
-            return
-          }
-          
           const catPos = window.__tatematika!.getCatPosition()
           const jumpState = window.__tatematika!.getCatJumpState()
+          const atBalloon = Math.abs(catPos.x - balloonCenterX) <= balloonRadius
+          if (!atBalloon) seenAway = true
+          if (atBalloon && seenAway) arrived = true
+          const jumping = jumpState.isJumping || catPos.y < restingY
+          if (arrived && atBalloon && jumping) jumpedAfter = true
           
           samples.push({
             t: elapsed,
             catX: catPos.x,
             catY: catPos.y,
-            isJumping: jumpState.isJumping || catPos.y < restingY
+            isJumping: jumping
           })
-        }, 50) // Poll every 50ms
+          
+          if ((seenAway && arrived && jumpedAfter) || elapsed > maxDuration) {
+            clearInterval(interval)
+            resolve(samples)
+          }
+        }, 50)
       })
-    }, { balloonCenterX, balloonRadius, restingY })
+    }, { balloonCenterX, balloonRadius, restingY, maxDuration: ACTION_TIMEOUT_MS })
     
     // Find when cat arrived at balloon (within radius)
     const arrivedIndex = samples.findIndex(s => 
@@ -302,20 +326,30 @@ test.describe('Review Findings - Keyboard Input', () => {
   })
 
   test('Finding 2c: К8 - Keyboard arrow keys and space must move cat and make it jump', async ({ page }) => {
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    test.setTimeout(multiRoundTestTimeout(2))
     // К8: "стрелките и интервала"
     
     const initialCatPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
     
     // Press right arrow to move cat
     await page.keyboard.press('ArrowRight')
-    await page.waitForTimeout(200)
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    await expect.poll(async () => {
+      const pos = await page.evaluate(() => window.__tatematika!.getCatPosition())
+      return pos.x > initialCatPos.x
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     const afterMovePos = await page.evaluate(() => window.__tatematika!.getCatPosition())
     expect(afterMovePos.x).toBeGreaterThan(initialCatPos.x)
     
     // Press left arrow
     await page.keyboard.press('ArrowLeft')
-    await page.waitForTimeout(200)
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    await expect.poll(async () => {
+      const pos = await page.evaluate(() => window.__tatematika!.getCatPosition())
+      return pos.x < afterMovePos.x
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
     const afterLeftPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
     expect(afterLeftPos.x).toBeLessThan(afterMovePos.x)
@@ -326,14 +360,14 @@ test.describe('Review Findings - Keyboard Input', () => {
     
     await page.keyboard.press('Space')
     
-    // Poll for up to 1000ms to detect jump
-    const spaceJumped = await page.evaluate(async ({ restingY }) => {
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    const spaceJumped = await page.evaluate(async ({ restingY, timeoutMs }) => {
       const startTime = Date.now()
       return new Promise<boolean>((resolve) => {
         const interval = setInterval(() => {
           const elapsed = Date.now() - startTime
           
-          if (elapsed > 1000) {
+          if (elapsed > timeoutMs) {
             clearInterval(interval)
             resolve(false)
             return
@@ -348,19 +382,20 @@ test.describe('Review Findings - Keyboard Input', () => {
           }
         }, 50)
       })
-    }, { restingY })
+    }, { restingY, timeoutMs: ACTION_TIMEOUT_MS })
     
     expect(spaceJumped, 'Space key did not trigger jump').toBe(true)
     
     // Test ArrowUp also works for jump
     // First wait for previous jump to end
-    await page.evaluate(async () => {
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    await page.evaluate(async (timeoutMs) => {
       const startTime = Date.now()
       return new Promise<void>((resolve) => {
         const interval = setInterval(() => {
           const elapsed = Date.now() - startTime
           
-          if (elapsed > 2000) {
+          if (elapsed > timeoutMs) {
             clearInterval(interval)
             resolve()
             return
@@ -374,19 +409,19 @@ test.describe('Review Findings - Keyboard Input', () => {
           }
         }, 50)
       })
-    })
+    }, ACTION_TIMEOUT_MS)
     
     // Now press ArrowUp
     await page.keyboard.press('ArrowUp')
     
-    // Poll for up to 1000ms to detect jump
-    const arrowUpJumped = await page.evaluate(async ({ restingY }) => {
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    const arrowUpJumped = await page.evaluate(async ({ restingY, timeoutMs }) => {
       const startTime = Date.now()
       return new Promise<boolean>((resolve) => {
         const interval = setInterval(() => {
           const elapsed = Date.now() - startTime
           
-          if (elapsed > 1000) {
+          if (elapsed > timeoutMs) {
             clearInterval(interval)
             resolve(false)
             return
@@ -401,7 +436,7 @@ test.describe('Review Findings - Keyboard Input', () => {
           }
         }, 50)
       })
-    }, { restingY })
+    }, { restingY, timeoutMs: ACTION_TIMEOUT_MS })
     
     expect(arrowUpJumped, 'ArrowUp key did not trigger jump').toBe(true)
   })
@@ -507,6 +542,8 @@ test.describe('Review Findings - Other Tests', () => {
   })
 
   test('Finding 7: getLevelEndText() must return text in LevelCompleteScene', async ({ page }) => {
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    test.setTimeout(multiRoundTestTimeout(5))
     // Test hook contract: getLevelEndText() should return the celebration text
     // Review found: returns null when LevelCompleteScene is active
     
@@ -541,6 +578,8 @@ test.describe('Review Findings - Other Tests', () => {
   })
 
   test('Finding 8: "Още веднъж" must continue from current level (spec К7)', async ({ page }) => {
+    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
+    test.setTimeout(multiRoundTestTimeout(6))
     // Spec К7: Level progression should continue, not restart from level 1
     // Review found: "Още веднъж" starts from level 1 again
     // Interpretation: After completing level 1, clicking "Още веднъж" should start level 2
