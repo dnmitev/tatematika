@@ -104,10 +104,14 @@ function checkBounce(frames: Array<{ x: number; y: number; frame: number }>): bo
 }
 
 test('K12: Repeated inputs during correct balloon action are fully ignored', async ({ page }) => {
+  // Check that getActionPhase hook exists
+  const hasGetActionPhase = await page.evaluate(() => typeof window.__tatematika!.getActionPhase === 'function')
+  expect(hasGetActionPhase, 'K12 CONTRACT: getActionPhase hook must be implemented').toBe(true)
+  
   // Wait for cat to be idle
   await expect.poll(async () => {
-    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    return !jumpState.isJumping
+    const phase = await page.evaluate(() => window.__tatematika!.getActionPhase!())
+    return phase === 'idle'
   }, { timeout: 5000, intervals: [50] }).toBe(true)
   
   const state = await page.evaluate(() => window.__tatematika!.getGameState())
@@ -120,91 +124,87 @@ test('K12: Repeated inputs during correct balloon action are fully ignored', asy
   const canvas = await getCanvasCoordinates(page)
   
   // Reset frame recorder and sound counter
-  await page.evaluate((id) => {
+  await page.evaluate(() => {
     window.__balloonFrameRecorder.clear()
     window.__oscillatorStarts = []
-  }, correctBalloon.id)
+  })
   
   const oscCountBefore = await page.evaluate(() => (window as any).__oscillatorStarts.length)
+  
+  // Install phase-based input injector
+  await page.evaluate((correctId, wrongId) => {
+    const game = window.__tatematika!.getGame()
+    const scene = game.scene.getScene('GameScene') as any
+    
+    window.__phaseInputs = []
+    let lastPhase = 'idle'
+    
+    const injectInput = () => {
+      const currentPhase = window.__tatematika!.getActionPhase!()
+      
+      // On first frame of each phase, dispatch synthetic input
+      if (currentPhase !== lastPhase && currentPhase !== 'idle') {
+        window.__phaseInputs.push(currentPhase)
+        
+        // Dispatch pointer event on correct balloon
+        const correctBounds = window.__tatematika!.getBalloonBounds(correctId)
+        if (correctBounds) {
+          const x = correctBounds.x + correctBounds.width / 2
+          const y = correctBounds.y + correctBounds.height / 2
+          scene.input.emit('pointerdown', { x, y, button: 0 })
+        }
+        
+        // Dispatch pointer event on wrong balloon if exists
+        if (wrongId) {
+          const wrongBounds = window.__tatematika!.getBalloonBounds(wrongId)
+          if (wrongBounds) {
+            const x = wrongBounds.x + wrongBounds.width / 2
+            const y = wrongBounds.y + wrongBounds.height / 2
+            scene.input.emit('pointerdown', { x, y, button: 0 })
+          }
+        }
+        
+        // Dispatch keyboard events
+        scene.input.keyboard.emit('keydown-SPACE')
+        scene.input.keyboard.emit('keydown-UP')
+      }
+      
+      lastPhase = currentPhase
+    }
+    
+    scene.events.on('postupdate', injectInput)
+    window.__stopPhaseInjector = () => scene.events.off('postupdate', injectInput)
+  }, correctBalloon.id, wrongBalloons[0]?.id)
   
   // Click correct balloon to start action
   await clickBalloon(page, correctBalloon.id, canvas)
   
-  // Record inputs in all phases
-  const inputPhases: string[] = []
-  
-  // Phase 1: During walk (before isJumping)
-  for (let i = 0; i < 3; i++) {
-    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    if (!jumpState.isJumping) {
-      inputPhases.push('walk')
-      await clickBalloon(page, correctBalloon.id, canvas)
-      if (wrongBalloons[0]) {
-        await clickBalloon(page, wrongBalloons[0].id, canvas)
-      }
-      await page.keyboard.press('Space')
-    } else {
-      break
-    }
-    await page.waitForTimeout(10)
-  }
-  
-  // Phase 2: Mid-jump
-  await expect.poll(async () => {
-    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    return jumpState.isJumping
-  }, { timeout: 2000, intervals: [10] }).toBe(true)
-  
-  for (let i = 0; i < 3; i++) {
-    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    if (jumpState.isJumping) {
-      inputPhases.push('jump')
-      await clickBalloon(page, correctBalloon.id, canvas)
-      if (wrongBalloons[0]) {
-        await clickBalloon(page, wrongBalloons[0].id, canvas)
-      }
-      await page.keyboard.press('ArrowUp')
-    }
-    await page.waitForTimeout(20)
-  }
-  
-  // Phase 3: During landing (after isJumping but before new round)
-  await expect.poll(async () => {
-    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    return !jumpState.isJumping
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
-  
-  for (let i = 0; i < 3; i++) {
-    const newState = await page.evaluate(() => window.__tatematika!.getGameState())
-    if (newState.stars === initialStars) {
-      inputPhases.push('landing')
-      await clickBalloon(page, correctBalloon.id, canvas)
-      if (wrongBalloons[0]) {
-        await clickBalloon(page, wrongBalloons[0].id, canvas)
-      }
-      await page.keyboard.press('Space')
-    } else {
-      break
-    }
-    await page.waitForTimeout(10)
-  }
-  
-  // Assert all phases were covered (precondition)
-  const walkCount = inputPhases.filter(p => p === 'walk').length
-  const jumpCount = inputPhases.filter(p => p === 'jump').length
-  const landingCount = inputPhases.filter(p => p === 'landing').length
-  
-  expect(walkCount, 'K12 PRECONDITION: walk phase must be covered to test input rejection during walk').toBeGreaterThan(0)
-  expect(jumpCount, 'K12 PRECONDITION: jump phase must be covered to test input rejection during jump').toBeGreaterThan(0)
-  expect(landingCount, 'K12 PRECONDITION: landing phase must be covered to test input rejection during landing').toBeGreaterThan(0)
-  
-  // Wait for evaluation to complete
+  // Wait for action to complete (star increases)
   await expect.poll(async () => {
     const newState = await page.evaluate(() => window.__tatematika!.getGameState())
     return newState.stars > initialStars
   }, { timeout: 5000, intervals: [50] }).toBe(true)
   
-  await page.waitForTimeout(100)
+  // Wait for phase to return to idle
+  await expect.poll(async () => {
+    const phase = await page.evaluate(() => window.__tatematika!.getActionPhase!())
+    return phase === 'idle'
+  }, { timeout: 2000, intervals: [50] }).toBe(true)
+  
+  // Stop phase injector and get recorded phases
+  const inputPhases = await page.evaluate(() => {
+    window.__stopPhaseInjector()
+    return window.__phaseInputs
+  })
+  
+  // Assert all phases were covered (precondition)
+  const walkCount = inputPhases.filter((p: string) => p === 'walk').length
+  const jumpCount = inputPhases.filter((p: string) => p === 'jump').length
+  const landingCount = inputPhases.filter((p: string) => p === 'landing').length
+  
+  expect(walkCount, 'K12 PRECONDITION: walk phase must be covered to test input rejection during walk').toBeGreaterThan(0)
+  expect(jumpCount, 'K12 PRECONDITION: jump phase must be covered to test input rejection during jump').toBeGreaterThan(0)
+  expect(landingCount, 'K12 PRECONDITION: landing phase must be covered to test input rejection during landing').toBeGreaterThan(0)
   
   // K12 assertions: target unchanged during action, evaluation happened exactly once
   const finalState = await page.evaluate(() => window.__tatematika!.getGameState())
@@ -300,9 +300,13 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
   await installFrameRecorder(page)
   
+  // Check that getActionPhase hook exists after reload
+  const hasGetActionPhase = await page.evaluate(() => typeof window.__tatematika!.getActionPhase === 'function')
+  expect(hasGetActionPhase, 'K13 CONTRACT: getActionPhase hook must be implemented').toBe(true)
+  
   await expect.poll(async () => {
-    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    return !jumpState.isJumping
+    const phase = await page.evaluate(() => window.__tatematika!.getActionPhase!())
+    return phase === 'idle'
   }, { timeout: 5000, intervals: [50] }).toBe(true)
   
   const state2 = await page.evaluate(() => window.__tatematika!.getGameState())
@@ -323,76 +327,78 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   
   const oscCountBefore = await page.evaluate(() => (window as any).__oscillatorStarts.length)
   
+  // Install phase-based input injector
+  await page.evaluate((correctId, wrongId) => {
+    const game = window.__tatematika!.getGame()
+    const scene = game.scene.getScene('GameScene') as any
+    
+    window.__phaseInputs = []
+    let lastPhase = 'idle'
+    
+    const injectInput = () => {
+      const currentPhase = window.__tatematika!.getActionPhase!()
+      
+      // On first frame of each phase, dispatch synthetic input
+      if (currentPhase !== lastPhase && currentPhase !== 'idle') {
+        window.__phaseInputs.push(currentPhase)
+        
+        // Dispatch pointer event on correct balloon
+        const correctBounds = window.__tatematika!.getBalloonBounds(correctId)
+        if (correctBounds) {
+          const x = correctBounds.x + correctBounds.width / 2
+          const y = correctBounds.y + correctBounds.height / 2
+          scene.input.emit('pointerdown', { x, y, button: 0 })
+        }
+        
+        // Dispatch pointer event on wrong balloon
+        const wrongBounds = window.__tatematika!.getBalloonBounds(wrongId)
+        if (wrongBounds) {
+          const x = wrongBounds.x + wrongBounds.width / 2
+          const y = wrongBounds.y + wrongBounds.height / 2
+          scene.input.emit('pointerdown', { x, y, button: 0 })
+        }
+        
+        // Dispatch keyboard events
+        scene.input.keyboard.emit('keydown-SPACE')
+        scene.input.keyboard.emit('keydown-LEFT')
+      }
+      
+      lastPhase = currentPhase
+    }
+    
+    scene.events.on('postupdate', injectInput)
+    window.__stopPhaseInjector = () => scene.events.off('postupdate', injectInput)
+  }, correctBalloon2.id, wrongBalloon2.id)
+  
   // Click wrong balloon to start action
   await clickBalloon(page, wrongBalloon2.id, canvas2)
-  
-  // Record inputs in all phases
-  const inputPhases: string[] = []
-  
-  // Phase 1: During walk (before isJumping)
-  for (let i = 0; i < 3; i++) {
-    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    if (!jumpState.isJumping) {
-      inputPhases.push('walk')
-      await clickBalloon(page, correctBalloon2.id, canvas2)
-      await clickBalloon(page, wrongBalloon2.id, canvas2)
-      await page.keyboard.press('Space')
-    } else {
-      break
-    }
-    await page.waitForTimeout(10)
-  }
-  
-  // Phase 2: Mid-jump
-  await expect.poll(async () => {
-    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    return jumpState.isJumping
-  }, { timeout: 2000, intervals: [10] }).toBe(true)
-  
-  for (let i = 0; i < 3; i++) {
-    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    if (jumpState.isJumping) {
-      inputPhases.push('jump')
-      await clickBalloon(page, correctBalloon2.id, canvas2)
-      await clickBalloon(page, wrongBalloon2.id, canvas2)
-      await page.keyboard.press('ArrowLeft')
-    }
-    await page.waitForTimeout(20)
-  }
-  
-  // Phase 3: During landing (after isJumping but before error is counted)
-  await expect.poll(async () => {
-    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    return !jumpState.isJumping
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
-  
-  for (let i = 0; i < 3; i++) {
-    const currentState = await page.evaluate(() => window.__tatematika!.getGameState())
-    if (currentState.wrongAttempts === initialWrongAttempts2) {
-      inputPhases.push('landing')
-      await clickBalloon(page, correctBalloon2.id, canvas2)
-      await clickBalloon(page, wrongBalloon2.id, canvas2)
-      await page.keyboard.press('Space')
-    } else {
-      break
-    }
-    await page.waitForTimeout(10)
-  }
-  
-  // Assert all phases were covered (precondition)
-  const walkCount2 = inputPhases.filter(p => p === 'walk').length
-  const jumpCount2 = inputPhases.filter(p => p === 'jump').length
-  const landingCount2 = inputPhases.filter(p => p === 'landing').length
-  
-  expect(walkCount2, 'K13 PRECONDITION: walk phase must be covered to test input rejection during walk').toBeGreaterThan(0)
-  expect(jumpCount2, 'K13 PRECONDITION: jump phase must be covered to test input rejection during jump').toBeGreaterThan(0)
-  expect(landingCount2, 'K13 PRECONDITION: landing phase must be covered to test input rejection during landing').toBeGreaterThan(0)
   
   // Wait for error to be counted
   await expect.poll(async () => {
     const newState = await page.evaluate(() => window.__tatematika!.getGameState())
     return newState.wrongAttempts > initialWrongAttempts2
   }, { timeout: 5000, intervals: [50] }).toBe(true)
+  
+  // Wait for phase to return to idle
+  await expect.poll(async () => {
+    const phase = await page.evaluate(() => window.__tatematika!.getActionPhase!())
+    return phase === 'idle'
+  }, { timeout: 2000, intervals: [50] }).toBe(true)
+  
+  // Stop phase injector and get recorded phases
+  const inputPhases = await page.evaluate(() => {
+    window.__stopPhaseInjector()
+    return window.__phaseInputs
+  })
+  
+  // Assert all phases were covered (precondition)
+  const walkCount2 = inputPhases.filter((p: string) => p === 'walk').length
+  const jumpCount2 = inputPhases.filter((p: string) => p === 'jump').length
+  const landingCount2 = inputPhases.filter((p: string) => p === 'landing').length
+  
+  expect(walkCount2, 'K13 PRECONDITION: walk phase must be covered to test input rejection during walk').toBeGreaterThan(0)
+  expect(jumpCount2, 'K13 PRECONDITION: jump phase must be covered to test input rejection during jump').toBeGreaterThan(0)
+  expect(landingCount2, 'K13 PRECONDITION: landing phase must be covered to test input rejection during landing').toBeGreaterThan(0)
   
   // K13 assertions: wrongAttempts increased exactly once, no additional errors/bounces/sounds
   const finalState = await page.evaluate(() => window.__tatematika!.getGameState())

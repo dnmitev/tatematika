@@ -77,6 +77,36 @@ export interface TatematikaTestHook {
    * varies per round (colors, IDs, timing), causing RNG stream drift.
    */
   setRoundRng?(rngFn: () => number): void
+  
+  /**
+   * K12/K13 Test Hook: Action Phase Detection
+   * 
+   * CONTRACT (Rule 8 requirement: walk, jump, and landing are distinct phases):
+   * Returns the current action phase so tests can detect when to inject input.
+   * 
+   * Phase definitions:
+   * - 'walk': From the accepted balloon choice until takeoff. Cat is moving horizontally
+   *           toward the target balloon.
+   * - 'jump': While the cat is in the air (after takeoff, before touchdown).
+   * - 'landing': From touchdown until the action is complete and input unlocks.
+   *              Includes evaluation (pop/bounce, star/error count) and any post-landing
+   *              animation before returning to idle.
+   * - 'idle': No action in progress. Input is accepted.
+   * 
+   * Timing requirements:
+   * - Pop, star increment, and error count may be evaluated at ANY point inside the action.
+   *   Tests MUST NOT depend on evaluation happening in a specific phase.
+   * - Each of walk, jump, and landing MUST last at least one rendered frame, because
+   *   Rule 8 names them as distinct phases of the action.
+   * 
+   * Test behavior:
+   * K12 and K13 tests inject input on the first frame of each phase (walk, jump, landing)
+   * and verify that all three phases received input but only the first input was processed.
+   * 
+   * Until implemented, K12 and K13 will FAIL immediately with:
+   * "K12/K13 CONTRACT: getActionPhase hook must be implemented"
+   */
+  getActionPhase?(): 'idle' | 'walk' | 'jump' | 'landing'
 }
 
 // Expose test hooks
