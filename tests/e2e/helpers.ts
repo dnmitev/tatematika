@@ -220,18 +220,40 @@ export async function popCorrectBalloonAndWait(page: any) {
   const correct = state.balloons.find((b: any) => b.isCorrect)!
   
   // Wait for game to be ready: cat not jumping, balloon exists and not animating
+  // Single-roundtrip readiness check to reduce latency on slower VMs
   await expect.poll(async () => {
-    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    const balloonBounds = await page.evaluate((id: string) => 
-      window.__tatematika!.getBalloonBounds(id), correct.id)
-    const balloonAnim = await page.evaluate((id: string) => 
-      window.__tatematika!.getBalloonAnimationState(id), correct.id)
+    const readiness = await page.evaluate((id: string) => {
+      const jumpState = window.__tatematika!.getCatJumpState()
+      const balloonBounds = window.__tatematika!.getBalloonBounds(id)
+      const balloonAnim = window.__tatematika!.getBalloonAnimationState(id)
+      return {
+        isJumping: jumpState.isJumping,
+        hasBounds: balloonBounds !== null,
+        isPopping: balloonAnim.isPopping,
+        isBouncing: balloonAnim.isBouncing
+      }
+    }, correct.id)
     
-    return !jumpState.isJumping && 
-           balloonBounds !== null && 
-           !balloonAnim.isPopping && 
-           !balloonAnim.isBouncing
-  }, { timeout: 5000, intervals: [50] }).toBe(true)
+    if (readiness.isJumping || !readiness.hasBounds || readiness.isPopping || readiness.isBouncing) {
+      // Store last sample for timeout diagnostics
+      (page as any)._lastReadinessSample = readiness
+      return false
+    }
+    return true
+  }, { 
+    timeout: 5000, 
+    intervals: [50],
+    message: () => {
+      const last = (page as any)._lastReadinessSample
+      if (!last) return 'Readiness check timed out (no sample available)'
+      const failures: string[] = []
+      if (last.isJumping) failures.push('isJumping=true')
+      if (!last.hasBounds) failures.push('hasBounds=false')
+      if (last.isPopping) failures.push('isPopping=true')
+      if (last.isBouncing) failures.push('isBouncing=true')
+      return `Readiness check timed out: ${failures.join(', ')}`
+    }
+  }).toBe(true)
   
   // Click the balloon
   await page.evaluate((id: string) => window.__tatematika!.clickBalloon(id), correct.id)
@@ -246,24 +268,36 @@ export async function popCorrectBalloonAndWait(page: any) {
   // - Cat is idle (not jumping)
   // - Exactly one isCorrect balloon present
   // - The correct balloon's formula evaluates to the current target
+  // Single-roundtrip check combining all state reads
   await expect.poll(async () => {
-    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    if (jumpState.isJumping) return false
+    const combinedState = await page.evaluate(() => {
+      const jumpState = window.__tatematika!.getCatJumpState()
+      const gameState = window.__tatematika!.getGameState()
+      
+      const correctBalloons = gameState.balloons.filter((b: any) => b.isCorrect)
+      
+      let formulaValid = false
+      if (correctBalloons.length === 1) {
+        const correct = correctBalloons[0]
+        const formulaMatch = correct.formula.match(/(\d+)\s*([+−-])\s*(\d+)/)
+        if (formulaMatch) {
+          const a = parseInt(formulaMatch[1])
+          const op = formulaMatch[2]
+          const b = parseInt(formulaMatch[3])
+          const result = op === '+' ? a + b : a - b
+          formulaValid = result === gameState.target
+        }
+      }
+      
+      return {
+        isJumping: jumpState.isJumping,
+        correctCount: correctBalloons.length,
+        formulaValid
+      }
+    })
     
-    const s = await page.evaluate(() => window.__tatematika!.getGameState())
-    const correctBalloons = s.balloons.filter((b: any) => b.isCorrect)
-    if (correctBalloons.length !== 1) return false
-    
-    // Verify the correct balloon's formula actually equals the target
-    const correct = correctBalloons[0]
-    const formulaMatch = correct.formula.match(/(\d+)\s*([+−-])\s*(\d+)/)
-    if (!formulaMatch) return false
-    
-    const a = parseInt(formulaMatch[1])
-    const op = formulaMatch[2]
-    const b = parseInt(formulaMatch[3])
-    const result = op === '+' ? a + b : a - b
-    
-    return result === s.target
+    return !combinedState.isJumping && 
+           combinedState.correctCount === 1 && 
+           combinedState.formulaValid
   }, { timeout: 10000, intervals: [50] }).toBe(true)
 }
