@@ -109,7 +109,7 @@ test.describe('PR #2 Review Regressions', () => {
       return !jumpState.isJumping
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
-    // Install per-frame recorder tracking jump progress
+    // Install per-frame recorder tracking jump progress and geometry
     await page.evaluate((targetId) => {
       const game = window.__tatematika!.getGame()
       const scene = game.scene.getScene('GameScene') as any
@@ -127,6 +127,13 @@ test.describe('PR #2 Review Regressions', () => {
           if (progress > 1) progress = 1
         }
         
+        // Get cat top edge (ears are at catY - 40 per drawCat)
+        const catTop = scene.catY !== undefined ? scene.catY - 40 : null
+        
+        // Get balloon bounds (bottom edge)
+        const balloonBounds = window.__tatematika!.getBalloonBounds(targetId)
+        const balloonBottom = balloonBounds ? balloonBounds.y + balloonBounds.height : null
+        
         frames.push({
           time: scene.time.now,
           isJumping: jumpState.isJumping,
@@ -135,7 +142,9 @@ test.describe('PR #2 Review Regressions', () => {
           spriteExists: bs ? !!bs.sprite : false,
           visible: bs?.sprite?.visible,
           alpha: bs?.sprite?.alpha,
-          isPopping: bs?.isPopping || false
+          isPopping: bs?.isPopping || false,
+          catTop,
+          balloonBottom
         })
       }
       
@@ -166,8 +175,12 @@ test.describe('PR #2 Review Regressions', () => {
       return window.__k3Frames
     })
     
-    // Contact threshold: src detects contact at progress >= 0.5 (arc peak)
+    // Contact thresholds:
+    // - Progress: src detects contact at progress >= 0.5 (arc peak)  
+    // - Geometry: cat top reaches balloon within clearance distance
+    // src uses 80px minClearance in calculateJumpHeight, so we verify cat gets within that margin
     const CONTACT_PROGRESS_THRESHOLD = 0.5
+    const CONTACT_TOLERANCE_PX = 85  // src clearance (80px) + small margin to account for balloon float
     
     // Find jumping frames
     const jumpingFrames = frames.filter((f: any) => f.isJumping)
@@ -175,18 +188,33 @@ test.describe('PR #2 Review Regressions', () => {
     // Assert: at least 5 jumping frames recorded (precondition check)
     expect(jumpingFrames.length, `only ${jumpingFrames.length} jumping frames recorded, jump too fast or recorder missed start`).toBeGreaterThanOrEqual(5)
     
-    // Find contact frame: first frame where jump progress >= 0.5
-    let contactFrameIndex = -1
+    // Find geometric contact frame: first frame where cat top reaches balloon bottom
+    let geometricContactFrameIndex = -1
     for (let i = 0; i < frames.length; i++) {
       const f = frames[i]
-      if (f.jumpProgress !== null && f.jumpProgress >= CONTACT_PROGRESS_THRESHOLD) {
-        contactFrameIndex = i
+      if (f.catTop !== null && f.balloonBottom !== null && 
+          f.catTop <= f.balloonBottom + CONTACT_TOLERANCE_PX) {
+        geometricContactFrameIndex = i
         break
       }
     }
     
-    expect(contactFrameIndex, 'contact frame not found - jump progress never reached 0.5').toBeGreaterThan(-1)
+    expect(geometricContactFrameIndex, 'geometric contact not found - cat never reached balloon').toBeGreaterThan(-1)
     
+    // Find progress-based contact frame: first frame where jump progress >= 0.5
+    let progressContactFrameIndex = -1
+    for (let i = 0; i < frames.length; i++) {
+      const f = frames[i]
+      if (f.jumpProgress !== null && f.jumpProgress >= CONTACT_PROGRESS_THRESHOLD) {
+        progressContactFrameIndex = i
+        break
+      }
+    }
+    
+    expect(progressContactFrameIndex, 'progress contact not found - jump progress never reached 0.5').toBeGreaterThan(-1)
+    
+    // Use geometric contact as the authoritative contact frame (not circular with src)
+    const contactFrameIndex = geometricContactFrameIndex
     const contactFrame = frames[contactFrameIndex]
     const framesBeforeContact = frames.slice(0, contactFrameIndex)
     
@@ -215,7 +243,7 @@ test.describe('PR #2 Review Regressions', () => {
       const popStartFrame = frames[popStartFrameIndex]
       expect(
         popStartFrameIndex >= contactFrameIndex,
-        `pop started at frame ${popStartFrameIndex} (t=${popStartFrame.time}, progress=${popStartFrame.jumpProgress?.toFixed(2)}) BEFORE cat reached balloon at frame ${contactFrameIndex} (t=${contactFrame.time}, progress=${contactFrame.jumpProgress.toFixed(2)})`
+        `pop started at frame ${popStartFrameIndex} (t=${popStartFrame.time}, progress=${popStartFrame.jumpProgress?.toFixed(2)}) BEFORE cat reached balloon at frame ${contactFrameIndex} (t=${contactFrame.time}, catTop=${contactFrame.catTop?.toFixed(1)}, balloonBottom=${contactFrame.balloonBottom?.toFixed(1)})`
       ).toBe(true)
     }
   })
