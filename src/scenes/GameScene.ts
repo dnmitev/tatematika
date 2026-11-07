@@ -7,6 +7,11 @@ import { getPraiseMessage, WRONG_ANSWER_MESSAGE, LEVEL_COMPLETE_TITLE, LEVEL_COM
 import { SettingsUI } from '../settings-ui'
 import { LevelCompleteUI } from '../level-complete-ui'
 
+// Must cover drawCat's ear tips at x ± 30
+const CAT_HALF_WIDTH = 30
+// Matches the approved jump-corridor spec: cat half-width plus 4px on each side
+const JUMP_CORRIDOR_MARGIN = 4
+
 interface BalloonSprite {
   id: string
   sprite: Phaser.GameObjects.Graphics
@@ -564,6 +569,10 @@ export class GameScene extends Phaser.Scene {
       ]
     }
     
+    if (count >= 4) {
+      this.clearTargetJumpCorridor(positions, correctBalloonIndex, balloonWidth, margin, availableWidth)
+    }
+    
     this.gameState.round.balloons.forEach((balloon, index) => {
       const { x, y } = positions[index]
 
@@ -596,6 +605,64 @@ export class GameScene extends Phaser.Scene {
     })
     
     this.currentJumpHeight = this.calculateJumpHeight()
+  }
+
+  /**
+   * The cat jumps straight up from under the target, so balloons in rows below
+   * the target must stay out of the vertical strip the cat sweeps.
+   * Lower-row balloons keep their row and left-to-right order; among the
+   * arrangements that keep them on screen, the one closest to the default
+   * layout is used. If none fits (very narrow viewports), layout is unchanged.
+   */
+  private clearTargetJumpCorridor(
+    positions: Array<{ x: number; y: number }>,
+    targetIndex: number,
+    balloonWidth: number,
+    margin: number,
+    availableWidth: number
+  ) {
+    const target = positions[targetIndex]
+    if (!target) return
+    
+    const lower = positions
+      .map((p, index) => ({ index, x: p.x, y: p.y }))
+      .filter(p => p.y > target.y)
+      .sort((a, b) => a.x - b.x)
+    if (lower.length === 0) return
+    
+    const radiusX = balloonWidth / 2
+    // Keep a normal inter-balloon margin between a balloon's edge and the corridor edge
+    const minCenterOffset = CAT_HALF_WIDTH + JUMP_CORRIDOR_MARGIN + radiusX + margin
+    if (lower.every(p => Math.abs(p.x - target.x) >= minCenterOffset)) return
+    
+    const minX = margin + radiusX
+    const maxX = availableWidth - margin - radiusX
+    const step = balloonWidth + margin
+    const k = lower.length
+    
+    let best: number[] | null = null
+    let bestCost = Infinity
+    for (let leftCount = 0; leftCount <= k; leftCount++) {
+      const xs: number[] = []
+      for (let i = 0; i < leftCount; i++) {
+        xs.push(target.x - minCenterOffset - (leftCount - 1 - i) * step)
+      }
+      for (let i = 0; i < k - leftCount; i++) {
+        xs.push(target.x + minCenterOffset + i * step)
+      }
+      if (xs.some(x => x < minX || x > maxX)) continue
+      
+      const cost = xs.reduce((sum, x, i) => sum + Math.abs(x - lower[i].x), 0)
+      if (cost < bestCost) {
+        bestCost = cost
+        best = xs
+      }
+    }
+    
+    if (!best) return
+    best.forEach((x, i) => {
+      positions[lower[i].index] = { x, y: lower[i].y }
+    })
   }
 
   private drawBalloon(graphics: Phaser.GameObjects.Graphics, x: number, y: number, isCorrect: boolean, width: number, height: number) {
