@@ -124,6 +124,89 @@ async function farthestWrongBalloon(page: any, balloons: Array<{ id: string }>) 
   return chosenDx > walkDxPx ? chosen : farthest
 }
 
+const WALK_MIN_PX = 2
+const MAX_WALK_ROUND_ATTEMPTS = 20
+
+async function correctBalloonDx(page: any): Promise<{ dx: number; catX: number; targetX: number | null }> {
+  return page.evaluate(() => {
+    const api = window.__tatematika!
+    const catX = api.getCatPosition().x
+    const correct = api.getGameState().balloons.find((b: any) => b.isCorrect)
+    const bounds = correct ? api.getBalloonBounds(correct.id) : null
+    if (!bounds) return { dx: -1, catX, targetX: null }
+    const targetX = bounds.x + bounds.width / 2
+    return { dx: Math.abs(targetX - catX), catX, targetX }
+  })
+}
+
+async function installRoundRng(page: any, seed: number): Promise<boolean> {
+  return page.evaluate((s: number) => {
+    const hook = window.__tatematika!
+    if (typeof hook.setRoundRng !== 'function') return false
+    let state = s
+    hook.setRoundRng(() => {
+      state |= 0
+      state = state + 0x6D2B79F5 | 0
+      let t = Math.imul(state ^ state >>> 15, 1 | state)
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t
+      return ((t ^ t >>> 14) >>> 0) / 4294967296
+    })
+    return true
+  }, seed)
+}
+
+async function regenerateRound(page: any, seed: number | null) {
+  if (seed !== null) await installRoundRng(page, seed)
+  await page.evaluate(() => {
+    window.__tatematika!.openSettings()
+    window.__tatematika!.closeSettings()
+  })
+  await expect.poll(async () => {
+    return page.evaluate(() => {
+      const api = window.__tatematika!
+      const idle = typeof api.getActionPhase === 'function'
+        ? api.getActionPhase() === 'idle'
+        : !api.getCatJumpState().isJumping
+      const correct = api.getGameState().balloons.find((b: any) => b.isCorrect)
+      return idle && !api.isSettingsOpen() && !!correct && !!api.getBalloonBounds(correct.id)
+    })
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
+}
+
+async function ensureCorrectBalloonNeedsWalk(page: any) {
+  // The cat jumps in place when the correct balloon is already above it, so the
+  // action has no walk phase. A walk starts only when |targetX - catX| > 2.
+  const distances: number[] = []
+  let placement = await correctBalloonDx(page)
+  distances.push(placement.dx)
+
+  if (placement.dx <= WALK_MIN_PX) {
+    const hasRng = await page.evaluate(() => typeof window.__tatematika!.setRoundRng === 'function')
+    let bestDx = placement.dx
+    let bestSeed: number | null = null
+    for (let attempt = 1; attempt <= MAX_WALK_ROUND_ATTEMPTS; attempt++) {
+      const seed = 0xC0120000 + attempt
+      await regenerateRound(page, hasRng ? seed : null)
+      placement = await correctBalloonDx(page)
+      distances.push(placement.dx)
+      if (placement.dx > bestDx) {
+        bestDx = placement.dx
+        bestSeed = hasRng ? seed : null
+      }
+      if (!hasRng && placement.dx > WALK_MIN_PX) break
+    }
+    if (hasRng && bestSeed !== null && bestDx > WALK_MIN_PX) {
+      await regenerateRound(page, bestSeed)
+      placement = await correctBalloonDx(page)
+    }
+  }
+
+  expect(
+    placement.dx,
+    `K12 PRECONDITION: correct balloon must be more than ${WALK_MIN_PX}px from the cat so the action includes a walk (catX=${placement.catX}, targetX=${placement.targetX}, rounds=${distances.length}, distances=[${distances.join(', ')}])`
+  ).toBeGreaterThan(WALK_MIN_PX)
+}
+
 test.beforeEach(async ({ page }) => {
   // Instrument oscillator to count sounds
   await page.addInitScript(() => {
@@ -185,6 +268,8 @@ test('K12: Repeated inputs during correct balloon action are fully ignored', asy
     const phase = await page.evaluate(() => window.__tatematika!.getActionPhase!())
     return phase === 'idle'
   }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
+
+  await ensureCorrectBalloonNeedsWalk(page)
   
   const state = await page.evaluate(() => window.__tatematika!.getGameState())
   const correctBalloon = state.balloons.find((b: any) => b.isCorrect)!
