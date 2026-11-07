@@ -45,8 +45,8 @@ export class GameScene extends Phaser.Scene {
   private pendingJumpBalloonId: string | null = null
   private jumpTargetBalloonId: string | null = null
   private jumpContactMade: boolean = false
-  private pendingStarAward: boolean = false
-  private starAwardTime: number = 0
+  private popAnimationStartTime: number = 0
+  private popAnimationCompleted: boolean = false
   
   private settingsUI!: SettingsUI
   private levelCompleteUI!: LevelCompleteUI
@@ -537,6 +537,8 @@ export class GameScene extends Phaser.Scene {
     this.catJumpTime = 0
     this.jumpTargetBalloonId = balloonId
     this.jumpContactMade = false
+    this.popAnimationStartTime = 0
+    this.popAnimationCompleted = false
     
     const isCorrect = checkBalloon(this.gameState.round, balloonId)
     
@@ -658,6 +660,10 @@ export class GameScene extends Phaser.Scene {
     this.catIsJumping = false
     this.catJumpTime = 0
     this.pendingJumpBalloonId = null
+    this.jumpTargetBalloonId = null
+    this.jumpContactMade = false
+    this.popAnimationStartTime = 0
+    this.popAnimationCompleted = false
     this.catTargetX = this.catX
     this.catY = this.catJumpStartY
     this.drawCat(this.cat, this.catX, this.catY)
@@ -755,34 +761,39 @@ export class GameScene extends Phaser.Scene {
             const balloon = this.balloonSprites.find(b => b.id === this.jumpTargetBalloonId)
             if (balloon) {
               balloon.isPopping = true
-              balloon.popStartTime = this.time.now
+              balloon.popStartTime = time
+              this.popAnimationStartTime = time
               this.playSound('pop')
             }
             this.showFeedback(getPraiseMessage(this.praiseIndex))
             this.praiseIndex++
-            this.pendingStarAward = true
-            this.starAwardTime = this.time.now + 400
           }
         }
       } else {
         this.catIsJumping = false
         this.catY = this.catJumpStartY
         this.drawCat(this.cat, this.catX, this.catY)
-        this.jumpTargetBalloonId = null
-        this.jumpContactMade = false
       }
     }
     
-    if (this.pendingStarAward && time >= this.starAwardTime) {
-      this.pendingStarAward = false
-      this.gameState = addStar(this.gameState)
+    // After jump completes, check if pop animation has finished (400ms), then award star
+    if (!this.catIsJumping && this.popAnimationStartTime > 0 && !this.popAnimationCompleted) {
+      const popElapsed = time - this.popAnimationStartTime
+      if (popElapsed >= 400) {
+        this.popAnimationCompleted = true
+        this.popAnimationStartTime = 0
+        this.jumpTargetBalloonId = null
+        this.jumpContactMade = false
+        
+        this.gameState = addStar(this.gameState)
 
-      if (isLevelComplete(this.gameState)) {
-        this.showLevelComplete()
-      } else {
-        this.gameState.round = handleCorrectPop(this.gameState.round, this.gameState.settings)
-        this.createBalloons()
-        this.updateUI()
+        if (isLevelComplete(this.gameState)) {
+          this.showLevelComplete()
+        } else {
+          this.gameState.round = handleCorrectPop(this.gameState.round, this.gameState.settings)
+          this.createBalloons()
+          this.updateUI()
+        }
       }
     }
     
@@ -823,7 +834,7 @@ export class GameScene extends Phaser.Scene {
           bs.sprite.alpha = 1
         }
 
-        if (!this.catIsJumping && !this.pendingStarAward) {
+        if (!this.catIsJumping && this.popAnimationStartTime === 0 && !this.pendingJumpBalloonId) {
           const catEarsTop = this.catJumpStartY - 40
           const catTopDuringJump = catEarsTop - this.currentJumpHeight
           const balloonRadius = bs.sprite.input ? (bs.sprite.input.hitArea as Phaser.Geom.Ellipse).height / 2 : 50
