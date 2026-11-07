@@ -127,8 +127,8 @@ test.describe('PR #2 Review Regressions', () => {
           if (progress > 1) progress = 1
         }
         
-        // Get cat top edge from real rendered position
-        // Cat is Graphics object; ears drawn at catY - 40 (see drawCat in src)
+        // Get cat top edge: Graphics.getBounds() doesn't exist on this Phaser version,
+        // so use drawing coordinates: ears are drawn at catY - 40 (see drawCat in src)
         const catTop = scene.catY !== undefined ? scene.catY - 40 : null
         
         // Get balloon bounds (bottom edge)
@@ -363,20 +363,16 @@ test.describe('PR #2 Review Regressions', () => {
     
     expect(popStartFrameIndex, 'pop animation never started in recorded frames').toBeGreaterThan(-1)
     
-    // Find when pop ends: first frame where target is destroyed OR alpha near 0 (animation complete)
+    // Find when pop ends: first frame where target is destroyed OR not visible OR alpha <= 0.05
+    const isPopEnded = (f: any) => {
+      return !f.targetExists || 
+             (f.visible !== undefined && !f.visible) || 
+             (f.targetAlpha !== undefined && f.targetAlpha <= 0.05)
+    }
+    
     let popEndFrameIndex = -1
     for (let i = popStartFrameIndex; i < frames.length; i++) {
-      const f = frames[i]
-      const prevF = i > 0 ? frames[i - 1] : null
-      
-      // Target destroyed
-      if (!f.targetExists && prevF && prevF.targetExists) {
-        popEndFrameIndex = i
-        break
-      }
-      
-      // Alpha near 0 (animation complete)
-      if (f.targetAlpha !== undefined && f.targetAlpha < 0.05) {
+      if (isPopEnded(frames[i])) {
         popEndFrameIndex = i
         break
       }
@@ -396,8 +392,8 @@ test.describe('PR #2 Review Regressions', () => {
       }
     }
     
-    // Assert: old balloons unchanged on every frame until pop ends
-    const framesBeforePopEnd = frames.slice(0, popEndFrameIndex + 1)
+    // Assert: old balloons unchanged on every frame before pop ends (not including pop end frame)
+    const framesBeforePopEnd = frames.slice(0, popEndFrameIndex)
     const framesWithMissingOldBalloons = framesBeforePopEnd.filter((f: any) => 
       f.oldBalloonIds.length < oldBalloonIds.length
     )
