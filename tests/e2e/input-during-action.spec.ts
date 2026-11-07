@@ -691,20 +691,20 @@ test('K15: New input accepted after action completes (keyboard)', async ({ page 
   const newCatPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
   
   // Navigate to correct balloon with arrow keys
-  const targetX = newBounds.x + newBounds.width / 2
-  if (newCatPos.x < targetX) {
+  const newTargetX = newBounds.x + newBounds.width / 2
+  if (newCatPos.x < newTargetX) {
     for (let i = 0; i < 20; i++) {
       await page.keyboard.press('ArrowRight')
       await page.waitForTimeout(30)
       const pos = await page.evaluate(() => window.__tatematika!.getCatPosition())
-      if (pos.x >= targetX - 10) break
+      if (pos.x >= newTargetX - 10) break
     }
   } else {
     for (let i = 0; i < 20; i++) {
       await page.keyboard.press('ArrowLeft')
       await page.waitForTimeout(30)
       const pos = await page.evaluate(() => window.__tatematika!.getCatPosition())
-      if (pos.x <= targetX + 10) break
+      if (pos.x <= newTargetX + 10) break
     }
   }
   
