@@ -34,13 +34,16 @@ function getMulberry32Code(seed: number): string {
   `
 }
 
+const CORRECT_PER_LEVEL = 20
+
 async function setBalloonCount(page: any, count: number) {
   await page.evaluate(() => window.__tatematika!.openSettings())
   
   const balloonCountInput = page.locator('[data-testid="setting-balloon-count"]').first()
   await balloonCountInput.fill(String(count))
   
-  // Set correctBalloonsPerLevel high to allow 30 rounds without level complete
+  // Spec allows 5–20 correct balloons per level. 20 is the maximum,
+  // so a 30- or 60-round sample continues across level-complete screens.
   const correctPerLevelInput = page.locator('[data-testid="setting-correct-per-level"]').first()
   const inputExists = await correctPerLevelInput.count()
   
@@ -48,17 +51,19 @@ async function setBalloonCount(page: any, count: number) {
     throw new Error('setting-correct-per-level input does not exist')
   }
   
-  await correctPerLevelInput.fill('100')
+  await correctPerLevelInput.fill(String(CORRECT_PER_LEVEL))
   
-  // Verify it accepted the value
   const setValue = await correctPerLevelInput.inputValue()
-  if (setValue !== '100') {
-    throw new Error(`setting-correct-per-level did not accept 100, got: ${setValue}`)
+  if (setValue !== String(CORRECT_PER_LEVEL)) {
+    throw new Error(`setting-correct-per-level did not accept ${CORRECT_PER_LEVEL}, got: ${setValue}`)
   }
   
   await page.evaluate(() => window.__tatematika!.closeSettings())
   
-  // Poll for correct sprite count instead of fixed wait
+  await expect.poll(async () => {
+    return page.evaluate(() => window.__tatematika!.getGameState().settings.correctBalloonsPerLevel)
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(CORRECT_PER_LEVEL)
+
   await expect.poll(async () => {
     const actualCount = await page.evaluate(() => {
       const game = window.__tatematika!.getGame()
@@ -69,6 +74,22 @@ async function setBalloonCount(page: any, count: number) {
   }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(count)
 }
 
+async function clickPlayAgainIfShown(page: any): Promise<void> {
+  const shown = await page.evaluate(() => {
+    const button = document.querySelector('[data-testid="button-play-again"]') as HTMLElement | null
+    if (!button) return false
+    let el: HTMLElement | null = button
+    while (el) {
+      const style = getComputedStyle(el)
+      if (style.display === 'none' || style.visibility === 'hidden') return false
+      el = el.parentElement
+    }
+    return true
+  })
+  if (!shown) return
+  await page.getByRole('button', { name: 'Още веднъж' }).click()
+}
+
 interface CellPosition {
   row: number
   col: number
@@ -77,13 +98,11 @@ interface CellPosition {
 async function playRoundsAndRecordSlots(page: any, count: number, rounds: number, seed?: number): Promise<{ 
   slots: number[], 
   cells: CellPosition[],
-  roundTokens: number[], 
-  levelCompleteAppeared: boolean 
+  roundTokens: number[]
 }> {
   const slots: number[] = []
   const cells: CellPosition[] = []
   const roundTokens: number[] = []
-  let levelCompleteAppeared = false
   
   // Inject seeded RNG for round generation via K17 test hook
   // This ensures deterministic shuffle by isolating round-generation randomness
@@ -130,17 +149,8 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
   })
   
   for (let round = 0; round < rounds; round++) {
-    // Check if level complete screen appeared
-    const levelCompleteVisible = await page.evaluate(() => {
-      const game = window.__tatematika!.getGame()
-      const levelScene = game.scene.getScene('LevelCompleteScene')
-      return levelScene && (levelScene as any).scene.isActive()
-    }).catch(() => false)
-    
-    if (levelCompleteVisible) {
-      levelCompleteAppeared = true
-      break
-    }
+    // К7: the level ends at the goal. Continue on the next level.
+    await clickPlayAgainIfShown(page)
     
     // Wait for cat to be idle and correct sprite count
     await expect.poll(async () => {
@@ -246,8 +256,10 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
       return jumpState.isJumping
     }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
-    // Wait for new round: cat idle, correct sprite count, and round token incremented
+    // Wait for new round: cat idle, correct sprite count, and round token incremented.
+    // A correct answer on the level goal opens „Още веднъж“ instead of the next round.
     await expect.poll(async () => {
+      await clickPlayAgainIfShown(page)
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       const spriteCount = await page.evaluate(() => {
         const game = window.__tatematika!.getGame()
@@ -259,7 +271,7 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
     }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
   }
   
-  return { slots, cells, roundTokens, levelCompleteAppeared }
+  return { slots, cells, roundTokens }
 }
 
 test.describe('Shuffle Distribution - 1280×800', () => {
@@ -320,9 +332,6 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       const result2 = await playRoundsAndRecordSlots(page, count, rounds, SEED_A)
       
       // Now perform all assertions
-      expect(result1.levelCompleteAppeared, 'Level complete screen should not appear during first run').toBe(false)
-      expect(result2.levelCompleteAppeared, 'Level complete screen should not appear during second run').toBe(false)
-      
       expect(result1.slots.length, 'Should have recorded all rounds in first run').toBe(rounds)
       expect(result2.slots.length, 'Should have recorded all rounds in second run').toBe(rounds)
       
@@ -362,7 +371,6 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       const result = await playRoundsAndRecordSlots(page, count, rounds, SEED_B)
       
       // Now perform all assertions
-      expect(result.levelCompleteAppeared, 'Level complete screen should not appear').toBe(false)
       expect(result.slots.length, 'Should have recorded all rounds').toBe(rounds)
       
       // Verify all round tokens are unique (30 different rounds)
@@ -396,7 +404,6 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       await setBalloonCount(page, count)
       const result = await playRoundsAndRecordSlots(page, count, rounds)
       
-      expect(result.levelCompleteAppeared, 'Level complete screen should not appear').toBe(false)
       expect(result.cells.length, 'Should have recorded all rounds').toBe(rounds)
       
       // Determine expected cells based on actual layout
@@ -447,7 +454,6 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       await setBalloonCount(page, count)
       const result = await playRoundsAndRecordSlots(page, count, rounds)
       
-      expect(result.levelCompleteAppeared, 'Level complete screen should not appear').toBe(false)
       expect(result.cells.length, 'Should have recorded all rounds').toBe(rounds)
       
       // Determine expected cells based on actual layout
