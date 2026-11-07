@@ -56,20 +56,42 @@ async function setBalloonCount(page: any, count: number) {
   }
   
   await page.evaluate(() => window.__tatematika!.closeSettings())
-  await page.waitForTimeout(200)
   
-  const actualCount = await page.evaluate(() => {
-    const game = window.__tatematika!.getGame()
-    const scene = game.scene.getScene('GameScene') as any
-    return scene.balloonSprites.length
-  })
-  
-  expect(actualCount).toBe(count)
+  // Poll for correct sprite count instead of fixed wait
+  await expect.poll(async () => {
+    const actualCount = await page.evaluate(() => {
+      const game = window.__tatematika!.getGame()
+      const scene = game.scene.getScene('GameScene') as any
+      return scene.balloonSprites.length
+    })
+    return actualCount
+  }, { timeout: 5000, intervals: [50] }).toBe(count)
 }
 
-async function playRoundsAndRecordSlots(page: any, count: number, rounds: number): Promise<{ slots: number[], levelCompleteAppeared: boolean }> {
+async function playRoundsAndRecordSlots(page: any, count: number, rounds: number): Promise<{ slots: number[], roundTokens: number[], levelCompleteAppeared: boolean }> {
   const slots: number[] = []
+  const roundTokens: number[] = []
   let levelCompleteAppeared = false
+  
+  // Initialize round token counter in the page
+  await page.evaluate(() => {
+    const game = window.__tatematika!.getGame()
+    const scene = game.scene.getScene('GameScene') as any
+    
+    // Track round changes by watching balloonSprites array reference changes
+    if (!window.__roundToken) {
+      window.__roundToken = 0
+      window.__lastBalloonSprites = scene.balloonSprites
+      
+      // Check for changes on every update
+      scene.events.on('postupdate', () => {
+        if (scene.balloonSprites !== window.__lastBalloonSprites) {
+          window.__roundToken++
+          window.__lastBalloonSprites = scene.balloonSprites
+        }
+      })
+    }
+  })
   
   for (let round = 0; round < rounds; round++) {
     // Check if level complete screen appeared
@@ -84,15 +106,23 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
       break
     }
     
-    // Wait for cat to be idle
+    // Wait for cat to be idle and correct sprite count
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-      return !jumpState.isJumping
+      const spriteCount = await page.evaluate(() => {
+        const game = window.__tatematika!.getGame()
+        const scene = game.scene.getScene('GameScene') as any
+        return scene.balloonSprites.length
+      })
+      return !jumpState.isJumping && spriteCount === count
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
     const correctBalloon = state.balloons.find((b: any) => b.isCorrect)!
-    const initialTarget = state.target
+    
+    // Record current round token
+    const currentToken = await page.evaluate(() => window.__roundToken)
+    roundTokens.push(currentToken)
     
     // Get all balloon centerX positions sorted to find slot
     const balloonPositions = await page.evaluate(() => {
@@ -121,6 +151,9 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
       slots.push(correctSlot)
     }
     
+    // Store current round token before click
+    const tokenBeforeClick = await page.evaluate(() => window.__roundToken)
+    
     // Click correct balloon to advance round
     await page.evaluate((id: string) => window.__tatematika!.clickBalloon(id), correctBalloon.id)
     
@@ -129,22 +162,54 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
       return jumpState.isJumping
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
-    // Wait for jump to complete
+    // Wait for new round: cat idle, correct sprite count, and round token incremented
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-      return !jumpState.isJumping
+      const spriteCount = await page.evaluate(() => {
+        const game = window.__tatematika!.getGame()
+        const scene = game.scene.getScene('GameScene') as any
+        return scene.balloonSprites.length
+      })
+      const newToken = await page.evaluate(() => window.__roundToken)
+      return !jumpState.isJumping && spriteCount === count && newToken > tokenBeforeClick
     }, { timeout: 10000, intervals: [50] }).toBe(true)
-    
-    // Small delay to allow new round creation
-    // With correctBalloonsPerLevel=100, we won't hit level complete in 30 rounds
-    await page.waitForTimeout(200)
   }
   
-  return { slots, levelCompleteAppeared }
+  return { slots, roundTokens, levelCompleteAppeared }
 }
 
 test.describe('Shuffle Distribution - 1280×800', () => {
   test.use({ viewport: { width: 1280, height: 800 } })
+  
+  // CPU throttle test to verify round token uniqueness under slow conditions
+  test('Count 3 Seed A with 4x CPU throttle: round tokens unique', async ({ page }) => {
+    test.setTimeout(180000) // 3 minutes for throttled execution
+    
+    const rounds = 30
+    const count = 3
+    
+    // Enable 4x CPU throttling via CDP
+    const client = await page.context().newCDPSession(page)
+    await client.send('Emulation.setCPUThrottlingRate', { rate: 4 })
+    
+    try {
+      await page.addInitScript(getMulberry32Code(SEED_A))
+      await page.goto('/')
+      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+      
+      await setBalloonCount(page, count)
+      const result = await playRoundsAndRecordSlots(page, count, rounds)
+      
+      // Main assertion: all round tokens are unique
+      const uniqueTokens = new Set(result.roundTokens)
+      expect(uniqueTokens.size, 'All 30 rounds should have unique tokens even with CPU throttle').toBe(rounds)
+      
+      expect(result.slots.length, 'Should have recorded all rounds').toBe(rounds)
+    } finally {
+      // Disable throttling
+      await client.send('Emulation.setCPUThrottlingRate', { rate: 1 })
+    }
+  })
   
   for (const count of [3, 4, 5]) {
     test(`Count ${count} Seed A: deterministic shuffle distribution (30 rounds)`, async ({ page }) => {
@@ -176,6 +241,13 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       expect(result1.slots.length, 'Should have recorded all rounds in first run').toBe(rounds)
       expect(result2.slots.length, 'Should have recorded all rounds in second run').toBe(rounds)
       
+      // Verify all round tokens are unique (30 different rounds)
+      const uniqueTokens1 = new Set(result1.roundTokens)
+      expect(uniqueTokens1.size, 'All 30 rounds should have unique tokens in first run').toBe(rounds)
+      
+      const uniqueTokens2 = new Set(result2.roundTokens)
+      expect(uniqueTokens2.size, 'All 30 rounds should have unique tokens in second run').toBe(rounds)
+      
       // Deterministic assertions for this specific seed
       const uniqueSlots = new Set(result1.slots)
       expect(uniqueSlots.size, 'Correct balloon should appear in at least 2 distinct slots').toBeGreaterThanOrEqual(2)
@@ -205,6 +277,10 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       // Now perform all assertions
       expect(result.levelCompleteAppeared, 'Level complete screen should not appear').toBe(false)
       expect(result.slots.length, 'Should have recorded all rounds').toBe(rounds)
+      
+      // Verify all round tokens are unique (30 different rounds)
+      const uniqueTokens = new Set(result.roundTokens)
+      expect(uniqueTokens.size, 'All 30 rounds should have unique tokens').toBe(rounds)
       
       // Deterministic assertions for this specific seed
       const uniqueSlots = new Set(result.slots)
