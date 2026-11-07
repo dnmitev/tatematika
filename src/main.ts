@@ -284,6 +284,15 @@ window.__tatematika = {
   // K17 CONTRACT: Controlled RNG for deterministic shuffle
   setRoundRng(rngFn: () => number) {
     setRoundRngInternal(rngFn)
+  },
+  
+  // K12/K13 CONTRACT: Action phase detection
+  getActionPhase(): 'idle' | 'walk' | 'jump' | 'landing' {
+    const gameScene = getGameScene()
+    if (!gameScene) {
+      return 'idle'
+    }
+    return gameScene.getActionPhase()
   }
 }
 
