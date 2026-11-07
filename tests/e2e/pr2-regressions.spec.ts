@@ -112,10 +112,16 @@ test.describe('PR #2 Review Regressions', () => {
     // Click the correct balloon
     await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correctBalloon.id)
     
-    // IMMEDIATELY after click: balloon must still exist and be visible
-    const boundsAfterClick = await page.evaluate((id) => 
+    // Wait for jump to START (clickBalloon sets pendingJump, game loop triggers it)
+    await expect.poll(async () => {
+      const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+      return jumpState.isJumping
+    }, { timeout: 2000, intervals: [16] }).toBe(true)
+    
+    // IMMEDIATELY after jump starts: balloon must still exist and be visible
+    const boundsAfterJumpStart = await page.evaluate((id) => 
       window.__tatematika!.getBalloonBounds(id), correctBalloon.id)
-    expect(boundsAfterClick, 'balloon must exist immediately after click').not.toBeNull()
+    expect(boundsAfterJumpStart, 'balloon must exist when jump starts').not.toBeNull()
     
     // Poll during jump: balloon must stay visible until cat reaches it
     let midJumpBalloonExists = false
@@ -184,6 +190,12 @@ test.describe('PR #2 Review Regressions', () => {
     
     // Click correct balloon
     await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correctBalloon.id)
+    
+    // Wait for jump to START (clickBalloon sets pendingJump, game loop triggers it)
+    await expect.poll(async () => {
+      const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+      return jumpState.isJumping
+    }, { timeout: 2000, intervals: [16] }).toBe(true)
     
     // Poll: during jump and pop animation, old balloons should still exist
     let oldBalloonsRemovedWhilePopping = false
