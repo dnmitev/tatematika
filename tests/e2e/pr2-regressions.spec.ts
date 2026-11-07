@@ -109,6 +109,32 @@ test.describe('PR #2 Review Regressions', () => {
       return !jumpState.isJumping
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
+    // Install per-frame recorder
+    await page.evaluate((targetId) => {
+      const game = window.__tatematika!.getGame()
+      const scene = game.scene.getScene('GameScene') as any
+      const frames: any[] = []
+      
+      const recordFrame = () => {
+        const jumpState = window.__tatematika!.getCatJumpState()
+        const bs = scene.balloonSprites.find((b: any) => b.id === targetId)
+        
+        frames.push({
+          time: scene.time.now,
+          isJumping: jumpState.isJumping,
+          balloonExists: !!bs,
+          spriteExists: bs ? !!bs.sprite : false,
+          visible: bs?.sprite?.visible,
+          alpha: bs?.sprite?.alpha,
+          isPopping: bs?.isPopping || false
+        })
+      }
+      
+      scene.events.on('postupdate', recordFrame)
+      window.__k3Frames = frames
+      window.__k3Stop = () => scene.events.off('postupdate', recordFrame)
+    }, correctBalloon.id)
+    
     // Click the correct balloon
     await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correctBalloon.id)
     
@@ -118,59 +144,33 @@ test.describe('PR #2 Review Regressions', () => {
       return jumpState.isJumping
     }, { timeout: 2000, intervals: [16] }).toBe(true)
     
-    // IMMEDIATELY after jump starts: balloon must still exist and be visible
-    const boundsAfterJumpStart = await page.evaluate((id) => 
-      window.__tatematika!.getBalloonBounds(id), correctBalloon.id)
-    expect(boundsAfterJumpStart, 'balloon must exist when jump starts').not.toBeNull()
-    
-    // Poll during jump: balloon must stay visible until cat reaches it
-    let midJumpBalloonExists = false
-    let midJumpIsPopping = false
-    
+    // Wait for jump to COMPLETE and pop to finish
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-      
-      if (jumpState.isJumping) {
-        // Check balloon still exists mid-jump
-        const bounds = await page.evaluate((id) => 
-          window.__tatematika!.getBalloonBounds(id), correctBalloon.id)
-        const animState = await page.evaluate((id) =>
-          window.__tatematika!.getBalloonAnimationState(id), correctBalloon.id)
-        
-        if (bounds !== null) {
-          midJumpBalloonExists = true
-        }
-        if (animState.isPopping) {
-          midJumpIsPopping = true
-        }
-      }
-      
-      return !jumpState.isJumping
-    }, { timeout: 5000, intervals: [30] }).toBe(true)
-    
-    // Assert: balloon existed and was visible during at least one mid-jump sample
-    expect(midJumpBalloonExists, 'balloon must stay visible mid-jump').toBe(true)
-    
-    // Now jump is complete. Check that pop animation happened
-    // (isPopping should have been true at some point, or balloon should be gone now)
-    const boundsAfterJump = await page.evaluate((id) => 
-      window.__tatematika!.getBalloonBounds(id), correctBalloon.id)
-    
-    // Balloon should now be gone OR in popping state
-    const animStateAfterJump = await page.evaluate((id) =>
-      window.__tatematika!.getBalloonAnimationState(id), correctBalloon.id)
-    
-    expect(
-      boundsAfterJump === null || midJumpIsPopping || animStateAfterJump.isPopping,
-      'balloon must pop after cat reaches it'
-    ).toBe(true)
-    
-    // Wait for new round with new balloons
-    await expect.poll(async () => {
       const newState = await page.evaluate(() => window.__tatematika!.getGameState())
-      return newState.stars === state.stars + 1 && 
-             newState.balloons.every((b: any) => b.id !== correctBalloon.id)
+      return !jumpState.isJumping && newState.stars === state.stars + 1
     }, { timeout: 5000, intervals: [50] }).toBe(true)
+    
+    // Stop recording and analyze timeline
+    const frames = await page.evaluate(() => {
+      window.__k3Stop()
+      return window.__k3Frames
+    })
+    
+    // Find jumping frames
+    const jumpingFrames = frames.filter((f: any) => f.isJumping)
+    
+    // Assert: at least 5 jumping frames recorded (precondition check)
+    expect(jumpingFrames.length, `only ${jumpingFrames.length} jumping frames recorded, jump too fast or recorder missed start`).toBeGreaterThanOrEqual(5)
+    
+    // Assert: balloon present and visible on every jumping frame UNTIL it starts popping
+    // Once isPopping=true, visible can become false as part of the pop animation
+    const jumpingBeforePopFrames = jumpingFrames.filter((f: any) => !f.isPopping)
+    const missingFrames = jumpingBeforePopFrames.filter((f: any) => !f.balloonExists || !f.spriteExists || !f.visible)
+    expect(
+      missingFrames.length,
+      `balloon missing or invisible on ${missingFrames.length} jumping-before-pop frames: ${missingFrames.map((f: any) => `t=${f.time} exists=${f.balloonExists} sprite=${f.spriteExists} visible=${f.visible} isPopping=${f.isPopping}`).join(', ')}`
+    ).toBe(0)
   })
 
   test('K3: New balloons only appear after pop animation completes (~400ms)', async ({ page }) => {
@@ -188,40 +188,113 @@ test.describe('PR #2 Review Regressions', () => {
       return !jumpState.isJumping
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
+    // Install per-frame recorder tracking balloon IDs and pop state
+    await page.evaluate(({ targetId, oldIds }) => {
+      const game = window.__tatematika!.getGame()
+      const scene = game.scene.getScene('GameScene') as any
+      const frames: any[] = []
+      let prevBalloonIds: string[] = []
+      
+      const recordFrame = () => {
+        const jumpState = window.__tatematika!.getCatJumpState()
+        const bs = scene.balloonSprites.find((b: any) => b.id === targetId)
+        const currentBalloonIds = scene.balloonSprites.map((b: any) => b.id).sort()
+        
+        const newBalloonsCreated = currentBalloonIds.filter((id: string) => !prevBalloonIds.includes(id))
+        
+        frames.push({
+          time: scene.time.now,
+          isJumping: jumpState.isJumping,
+          targetExists: !!bs,
+          targetIsPopping: bs?.isPopping || false,
+          targetAlpha: bs?.sprite?.alpha,
+          targetScale: bs?.sprite?.scaleX,
+          balloonIds: currentBalloonIds,
+          oldBalloonIds: oldIds.filter((id: string) => currentBalloonIds.includes(id)),
+          newBalloonsCreated: newBalloonsCreated.length > 0 ? newBalloonsCreated : null
+        })
+        
+        prevBalloonIds = currentBalloonIds
+      }
+      
+      scene.events.on('postupdate', recordFrame)
+      window.__k3Frames = frames
+      window.__k3Stop = () => scene.events.off('postupdate', recordFrame)
+    }, { targetId: correctBalloon.id, oldIds: oldBalloonIds })
+    
     // Click correct balloon
     await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correctBalloon.id)
     
-    // Wait for jump to START (clickBalloon sets pendingJump, game loop triggers it)
+    // Wait for jump to START
     await expect.poll(async () => {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       return jumpState.isJumping
     }, { timeout: 2000, intervals: [16] }).toBe(true)
     
-    // Poll: during jump and pop animation, old balloons should still exist
-    let oldBalloonsRemovedWhilePopping = false
+    // Wait 1.5s after pop should have started (600ms jump + 400ms pop + margin)
+    await page.waitForTimeout(1500)
     
-    await expect.poll(async () => {
-      const animState = await page.evaluate((id) =>
-        window.__tatematika!.getBalloonAnimationState(id), correctBalloon.id)
-      
-      if (animState.isPopping) {
-        // Check if old balloons are already gone
-        const currentState = await page.evaluate(() => window.__tatematika!.getGameState())
-        const currentIds = currentState.balloons.map((b: any) => b.id).sort()
-        const allOldBalloonsGone = oldBalloonIds.every(id => !currentIds.includes(id))
-        
-        if (allOldBalloonsGone) {
-          oldBalloonsRemovedWhilePopping = true
+    // Stop recording and analyze timeline
+    const frames = await page.evaluate(() => {
+      window.__k3Stop()
+      return window.__k3Frames
+    })
+    
+    // Find when pop ends: first frame where target is no longer popping OR no longer exists
+    let popEndFrameIndex = -1
+    for (let i = 0; i < frames.length; i++) {
+      const f = frames[i]
+      const prevWasPopping = i > 0 && frames[i - 1].targetIsPopping
+      if (prevWasPopping && (!f.targetIsPopping || !f.targetExists)) {
+        popEndFrameIndex = i
+        break
+      }
+    }
+    
+    // If pop never ended in recording, find last frame where target was popping
+    if (popEndFrameIndex === -1) {
+      for (let i = frames.length - 1; i >= 0; i--) {
+        if (frames[i].targetIsPopping) {
+          popEndFrameIndex = i
+          break
         }
       }
-      
-      // Wait until animation completes and new balloons appear
-      const newState = await page.evaluate(() => window.__tatematika!.getGameState())
-      return newState.stars === state.stars + 1
-    }, { timeout: 5000, intervals: [30] }).toBe(true)
+    }
     
-    // Assert: old balloons should NOT be removed while popping animation is active
-    expect(oldBalloonsRemovedWhilePopping, 'new balloons must wait until pop animation completes').toBe(false)
+    expect(popEndFrameIndex, 'pop animation never started in recorded frames').toBeGreaterThan(-1)
+    
+    const popEndTime = frames[popEndFrameIndex].time
+    
+    // Find first frame where new balloon IDs appear
+    let firstNewBalloonFrameIndex = -1
+    for (let i = 0; i < frames.length; i++) {
+      if (frames[i].newBalloonsCreated) {
+        firstNewBalloonFrameIndex = i
+        break
+      }
+    }
+    
+    // Assert: old balloons unchanged on every frame until pop ends
+    const framesBeforePopEnd = frames.slice(0, popEndFrameIndex + 1)
+    const framesWithMissingOldBalloons = framesBeforePopEnd.filter((f: any) => 
+      f.oldBalloonIds.length < oldBalloonIds.length
+    )
+    
+    expect(
+      framesWithMissingOldBalloons.length,
+      `old balloons removed before pop ended: ${framesWithMissingOldBalloons.length} frames had missing balloons before pop end at t=${popEndTime}`
+    ).toBe(0)
+    
+    // Assert: new balloons only appear at or after pop end
+    if (firstNewBalloonFrameIndex !== -1) {
+      const firstNewBalloonTime = frames[firstNewBalloonFrameIndex].time
+      const delta = firstNewBalloonTime - popEndTime
+      
+      expect(
+        firstNewBalloonFrameIndex >= popEndFrameIndex,
+        `new balloons appeared at frame ${firstNewBalloonFrameIndex} (t=${firstNewBalloonTime}) BEFORE pop ended at frame ${popEndFrameIndex} (t=${popEndTime}), delta=${delta.toFixed(1)}ms`
+      ).toBe(true)
+    }
   })
 
   // ============================================================================
