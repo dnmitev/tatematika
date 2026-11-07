@@ -475,6 +475,15 @@ export class GameScene extends Phaser.Scene {
       const maxBalloonHeight = (maxHeightWithMinMargin - margin) / 2
       if (balloonHeight > maxBalloonHeight) {
         balloonHeight = Math.max(minTarget, maxBalloonHeight)
+        // Re-apply desktop proportions after height adjustment
+        if (this.scale.width >= 1024) {
+          const currentAspect = balloonWidth / balloonHeight
+          if (currentAspect < 0.75) {
+            balloonWidth = balloonHeight * 0.75
+          } else if (currentAspect > 1.05) {
+            balloonHeight = balloonWidth / 1.05
+          }
+        }
       }
       
       const leftMargin = (availableWidth - (2 * balloonWidth + margin)) / 2
@@ -503,6 +512,15 @@ export class GameScene extends Phaser.Scene {
       const maxBalloonHeight = (maxHeightWithMinMargin - margin) / rows
       if (balloonHeight > maxBalloonHeight) {
         balloonHeight = Math.max(minTarget, maxBalloonHeight)
+        // Re-apply desktop proportions after height adjustment
+        if (this.scale.width >= 1024) {
+          const currentAspect = balloonWidth / balloonHeight
+          if (currentAspect < 0.75) {
+            balloonWidth = balloonHeight * 0.75
+          } else if (currentAspect > 1.05) {
+            balloonHeight = balloonWidth / 1.05
+          }
+        }
       }
       
       const maxWidthForTopRow = (availableWidth - 5 * margin) / 4
