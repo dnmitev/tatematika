@@ -132,7 +132,7 @@ test('K12: Repeated inputs during correct balloon action are fully ignored', asy
   const oscCountBefore = await page.evaluate(() => (window as any).__oscillatorStarts.length)
   
   // Install phase-based input injector
-  await page.evaluate((correctId, wrongId) => {
+  await page.evaluate(({ correctId, wrongId }) => {
     const game = window.__tatematika!.getGame()
     const scene = game.scene.getScene('GameScene') as any
     
@@ -174,7 +174,7 @@ test('K12: Repeated inputs during correct balloon action are fully ignored', asy
     
     scene.events.on('postupdate', injectInput)
     window.__stopPhaseInjector = () => scene.events.off('postupdate', injectInput)
-  }, correctBalloon.id, wrongBalloons[0]?.id)
+  }, { correctId: correctBalloon.id, wrongId: wrongBalloons[0]?.id })
   
   // Click correct balloon to start action
   await clickBalloon(page, correctBalloon.id, canvas)
@@ -328,7 +328,7 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   const oscCountBefore = await page.evaluate(() => (window as any).__oscillatorStarts.length)
   
   // Install phase-based input injector
-  await page.evaluate((correctId, wrongId) => {
+  await page.evaluate(({ correctId, wrongId }) => {
     const game = window.__tatematika!.getGame()
     const scene = game.scene.getScene('GameScene') as any
     
@@ -368,7 +368,7 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
     
     scene.events.on('postupdate', injectInput)
     window.__stopPhaseInjector = () => scene.events.off('postupdate', injectInput)
-  }, correctBalloon2.id, wrongBalloon2.id)
+  }, { correctId: correctBalloon2.id, wrongId: wrongBalloon2.id })
   
   // Click wrong balloon to start action
   await clickBalloon(page, wrongBalloon2.id, canvas2)
