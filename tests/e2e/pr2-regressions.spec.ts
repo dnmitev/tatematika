@@ -340,7 +340,8 @@ test.describe('PR #2 Review Regressions', () => {
             const ctxTime = this.currentTime;
             for (const osc of oscillators) {
               if (osc.ctx === this && osc.ctxClosedAt === 0) {
-                osc.ctxClosedAt = ctxTime;
+                // Use currentTime if available, otherwise use perfTime difference
+                osc.ctxClosedAt = ctxTime || 0;
                 osc.ctxClosePerfTime = perfTime;
               }
             }
@@ -532,21 +533,24 @@ test.describe('PR #2 Review Regressions', () => {
             }
           }
           
-          // Check context close/suspend
-          if (osc.ctxClosedAt > 0) {
+          // Check context close/suspend (use perfTime to detect if called, ctxTime might be 0)
+          if (osc.ctxClosePerfTime > 0) {
             const issuedAfterMute = osc.ctxClosePerfTime >= muteSnapshot.perfNow ||
                                      osc.ctxClosedAt >= ctxTimeAtMute;
-            if (issuedAfterMute && osc.ctxClosedAt < effectiveEnd) {
-              effectiveEnd = osc.ctxClosedAt;
+            // Use ctxClosedAt if available, otherwise use ctxTimeAtMute (close makes it immediate)
+            const effectiveCloseTime = osc.ctxClosedAt > 0 ? osc.ctxClosedAt : ctxTimeAtMute;
+            if (issuedAfterMute && effectiveCloseTime < effectiveEnd) {
+              effectiveEnd = effectiveCloseTime;
               silencedBy = 'close';
             }
           }
           
-          if (osc.ctxSuspendedAt > 0) {
+          if (osc.ctxSuspendPerfTime > 0) {
             const issuedAfterMute = osc.ctxSuspendPerfTime >= muteSnapshot.perfNow ||
                                      osc.ctxSuspendedAt >= ctxTimeAtMute;
-            if (issuedAfterMute && osc.ctxSuspendedAt < effectiveEnd) {
-              effectiveEnd = osc.ctxSuspendedAt;
+            const effectiveSuspendTime = osc.ctxSuspendedAt > 0 ? osc.ctxSuspendedAt : ctxTimeAtMute;
+            if (issuedAfterMute && effectiveSuspendTime < effectiveEnd) {
+              effectiveEnd = effectiveSuspendTime;
               silencedBy = 'suspend';
             }
           }
