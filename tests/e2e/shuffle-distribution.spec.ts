@@ -80,12 +80,32 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
     // Wait for new round (balloon ID set change)
+    // Handle level-complete by clicking through if needed
     await expect.poll(async () => {
+      // Check for level complete screen first
+      const levelCompleteVisible = await page.evaluate(() => {
+        const game = window.__tatematika!.getGame()
+        const levelScene = game.scene.getScene('LevelCompleteScene')
+        return levelScene && (levelScene as any).scene.isActive()
+      }).catch(() => false)
+      
+      if (levelCompleteVisible) {
+        // Click next level button if available
+        await page.evaluate(() => {
+          const game = window.__tatematika!.getGame()
+          const levelScene = game.scene.getScene('LevelCompleteScene') as any
+          if (levelScene && levelScene.nextButton) {
+            levelScene.nextButton.emit('pointerdown')
+          }
+        }).catch(() => {})
+        return false
+      }
+      
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       const newState = await page.evaluate(() => window.__tatematika!.getGameState())
       const newBalloonIds = newState.balloons.map((b: any) => b.id).sort()
       return !jumpState.isJumping && JSON.stringify(newBalloonIds) !== JSON.stringify(initialBalloonIds)
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    }, { timeout: 10000, intervals: [100] }).toBe(true)
   }
   
   return slots
