@@ -133,6 +133,10 @@ export class LevelCompleteUI {
     }
   }
 
+  public isVisible(): boolean {
+    return this.container?.style.display === 'flex'
+  }
+
   public destroy() {
     if (this.container && this.container.parentElement) {
       this.container.remove()
