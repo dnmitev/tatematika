@@ -1,16 +1,28 @@
-import type { RoundState, Balloon, GameSettings } from './types'
+import type { RoundState, Balloon, GameSettings, RandomGenerator } from './types'
 import { generateTarget, generateRoundFormulas } from './formula-generator'
+
+// Global RNG for round generation (injectable via setRoundRng hook)
+let roundRng: RandomGenerator | undefined
+
+export function setRoundRng(rngFn: (() => number) | undefined) {
+  if (rngFn) {
+    roundRng = { random: rngFn }
+  } else {
+    roundRng = undefined
+  }
+}
 
 /**
  * Create a new round with balloons
  */
 export function createRound(settings: GameSettings): RoundState {
-  const target = generateTarget(settings.upperLimit)
+  const target = generateTarget(settings.upperLimit, roundRng)
   const formulas = generateRoundFormulas(
     target,
     settings.balloonCount,
     settings.upperLimit,
-    settings.operations
+    settings.operations,
+    roundRng
   )
 
   const balloons: Balloon[] = formulas.map((formula, index) => ({

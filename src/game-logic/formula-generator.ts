@@ -5,21 +5,23 @@ import type { Formula, Operation, RandomGenerator } from './types'
  */
 export function generateFormula(
   upperLimit: number,
-  operation: Operation
+  operation: Operation,
+  rng?: RandomGenerator
 ): Formula {
   let formula: Formula
   let attempts = 0
   const maxAttempts = 1000
+  const random = rng ? () => rng.random() : () => Math.random()
 
   do {
     const actualOp = operation === 'both' 
-      ? (Math.random() < 0.5 ? 'addition' : 'subtraction')
+      ? (random() < 0.5 ? 'addition' : 'subtraction')
       : operation
 
     if (actualOp === 'addition') {
-      const left = randomInt(0, upperLimit)
+      const left = randomInt(0, upperLimit, rng)
       const maxRight = upperLimit - left
-      const right = randomInt(0, maxRight)
+      const right = randomInt(0, maxRight, rng)
       const result = left + right
       formula = {
         left,
@@ -29,8 +31,8 @@ export function generateFormula(
         display: formatFormula({ left, operator: '+', right, result, display: '' })
       }
     } else {
-      const left = randomInt(0, upperLimit)
-      const right = randomInt(0, left)
+      const left = randomInt(0, upperLimit, rng)
+      const right = randomInt(0, left, rng)
       const result = left - right
       formula = {
         left,
@@ -50,8 +52,9 @@ export function generateFormula(
   return formula
 }
 
-function randomInt(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min
+function randomInt(min: number, max: number, rng?: RandomGenerator): number {
+  const random = rng ? () => rng.random() : () => Math.random()
+  return Math.floor(random() * (max - min + 1)) + min
 }
 
 /**
@@ -72,7 +75,7 @@ export function generateRoundFormulas(
   const maxAttempts = 1000
   
   for (let attempt = 0; attempt < maxAttempts && !correctFormula; attempt++) {
-    const formula = generateFormula(upperLimit, operation)
+    const formula = generateFormula(upperLimit, operation, rng)
     if (formula.result === target && !usedFormulas.has(formula.display)) {
       correctFormula = formula
       usedFormulas.add(formula.display)
@@ -89,7 +92,7 @@ export function generateRoundFormulas(
   for (let i = 1; i < count; i++) {
     let wrongFormula: Formula | null = null
     for (let attempt = 0; attempt < maxAttempts && !wrongFormula; attempt++) {
-      const formula = generateFormula(upperLimit, operation)
+      const formula = generateFormula(upperLimit, operation, rng)
       if (
         formula.result !== target &&
         !usedResults.has(formula.result) &&
@@ -145,8 +148,8 @@ function createFormulaForTarget(target: number, operation: Operation): Formula {
 /**
  * Generate a random target number within the upper limit
  */
-export function generateTarget(upperLimit: number): number {
-  return randomInt(0, upperLimit)
+export function generateTarget(upperLimit: number, rng?: RandomGenerator): number {
+  return randomInt(0, upperLimit, rng)
 }
 
 /**

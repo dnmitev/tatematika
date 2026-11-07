@@ -466,104 +466,56 @@ export class GameScene extends Phaser.Scene {
         }))
       }
     } else if (count === 4) {
-      // Count 4 layout strategy:
-      // - Desktop (>=1024px): single row to avoid corridor conflicts while respecting shuffle
-      // - Mobile: 2x2 grid acceptable (deferred v1 scope)
+      // Count 4: 2×2 grid for both desktop and mobile
+      // Array positions [0,1,2,3] map to cells (0,0), (0,1), (1,0), (1,1)
       
-      if (this.scale.width >= 1024) {
-        // Desktop: single row layout - all same Y, no corridor conflicts
-        const totalWidth = count * balloonWidth + (count - 1) * margin
-        if (totalWidth > availableWidth - 2 * margin) {
-          // Shrink if needed
-          balloonWidth = Math.max(minTarget, (availableWidth - (count + 1) * margin) / count)
-        }
-        
-        const rowTotalWidth = count * balloonWidth + (count - 1) * margin
-        const startX = (availableWidth - rowTotalWidth) / 2 + balloonWidth / 2
-        const y = hudTopSpace + availableHeight / 2
-        
-        positions = Array.from({ length: count }, (_, i) => ({
-          x: startX + i * (balloonWidth + margin),
-          y
-        }))
-      } else {
-        // Mobile: 2×2 grid (test coverage deferred)
-        const leftMargin = (availableWidth - (2 * balloonWidth + margin)) / 2
-        const col1 = leftMargin + balloonWidth / 2
-        const col2 = col1 + balloonWidth + margin
-        
-        const finalTotalHeight = 2 * balloonHeight + margin
-        const topMargin = (availableHeight - finalTotalHeight) / 2
-        const y1 = hudTopSpace + topMargin + balloonHeight / 2
-        const y2 = y1 + balloonHeight + margin
-        
-        positions = [
-          { x: col1, y: y1 },
-          { x: col2, y: y1 },
-          { x: col1, y: y2 },
-          { x: col2, y: y2 }
-        ]
-      }
+      const leftMargin = (availableWidth - (2 * balloonWidth + margin)) / 2
+      const col1 = leftMargin + balloonWidth / 2
+      const col2 = col1 + balloonWidth + margin
+      
+      const finalTotalHeight = 2 * balloonHeight + margin
+      const topMargin = (availableHeight - finalTotalHeight) / 2
+      const y1 = hudTopSpace + topMargin + balloonHeight / 2
+      const y2 = y1 + balloonHeight + margin
+      
+      positions = [
+        { x: col1, y: y1 },
+        { x: col2, y: y1 },
+        { x: col1, y: y2 },
+        { x: col2, y: y2 }
+      ]
     } else {
-      // Count 5 layout strategy:
-      // - Desktop (>=1024px): single row to avoid corridor conflicts while respecting shuffle
-      // - Mobile: multi-row acceptable (deferred v1 scope)
+      // Count 5: 4+1 layout (4 on top row, 1 on bottom row)
+      // Array positions [0,1,2,3,4] map to cells (0,0), (0,1), (0,2), (0,3), (1,0)
       
-      if (this.scale.width >= 1024) {
-        // Desktop: single row layout - all same Y, no corridor conflicts
-        const totalWidth = count * balloonWidth + (count - 1) * margin
-        if (totalWidth > availableWidth - 2 * margin) {
-          // Shrink if needed
-          balloonWidth = Math.max(minTarget, (availableWidth - (count + 1) * margin) / count)
-        }
-        
-        // Ensure desktop proportions after shrinking
-        const currentAspect = balloonWidth / balloonHeight
-        if (currentAspect > 1.05) {
-          balloonHeight = balloonWidth / 1.05
-        } else if (currentAspect < 0.75) {
-          balloonWidth = balloonHeight * 0.75
-        }
-        
-        const rowTotalWidth = count * balloonWidth + (count - 1) * margin
-        const startX = (availableWidth - rowTotalWidth) / 2 + balloonWidth / 2
-        const y = hudTopSpace + availableHeight / 2
-        
-        positions = Array.from({ length: count }, (_, i) => ({
-          x: startX + i * (balloonWidth + margin),
-          y
-        }))
-      } else {
-        // Mobile: 2-3 layout (test coverage deferred)
-        const rows = 2
-        const totalHeight = rows * balloonHeight + margin
-        if (totalHeight > availableHeight) {
-          balloonHeight = Math.max(minTarget, (availableHeight - margin) / rows)
-        }
-        
-        const maxWidthForBottomRow = (availableWidth - 4 * margin) / 3
-        if (balloonWidth > maxWidthForBottomRow) {
-          balloonWidth = Math.max(minTarget, maxWidthForBottomRow)
-        }
-        
-        const finalTotalHeight = rows * balloonHeight + margin
-        const topMargin = (availableHeight - finalTotalHeight) / 2
-        const y1 = hudTopSpace + topMargin + balloonHeight / 2
-        const y2 = y1 + balloonHeight + margin
-        
-        const topRowWidth = 2 * balloonWidth + margin
-        const topRowStartX = (availableWidth - topRowWidth) / 2 + balloonWidth / 2
-        const bottomRowWidth = 3 * balloonWidth + 2 * margin
-        const bottomRowStartX = (availableWidth - bottomRowWidth) / 2 + balloonWidth / 2
-        
-        positions = [
-          { x: topRowStartX, y: y1 },
-          { x: topRowStartX + balloonWidth + margin, y: y1 },
-          { x: bottomRowStartX, y: y2 },
-          { x: bottomRowStartX + balloonWidth + margin, y: y2 },
-          { x: bottomRowStartX + 2 * (balloonWidth + margin), y: y2 }
-        ]
+      const rows = 2
+      const totalHeight = rows * balloonHeight + margin
+      if (totalHeight > availableHeight) {
+        balloonHeight = Math.max(minTarget, (availableHeight - margin) / rows)
       }
+      
+      const maxWidthForTopRow = (availableWidth - 5 * margin) / 4
+      if (balloonWidth > maxWidthForTopRow) {
+        balloonWidth = Math.max(minTarget, maxWidthForTopRow)
+      }
+      
+      const finalTotalHeight = rows * balloonHeight + margin
+      const topMargin = (availableHeight - finalTotalHeight) / 2
+      const y1 = hudTopSpace + topMargin + balloonHeight / 2
+      const y2 = y1 + balloonHeight + margin
+      
+      const topRowWidth = 4 * balloonWidth + 3 * margin
+      const topRowStartX = (availableWidth - topRowWidth) / 2 + balloonWidth / 2
+      
+      const bottomRowX = availableWidth / 2
+      
+      positions = [
+        { x: topRowStartX, y: y1 },
+        { x: topRowStartX + balloonWidth + margin, y: y1 },
+        { x: topRowStartX + 2 * (balloonWidth + margin), y: y1 },
+        { x: topRowStartX + 3 * (balloonWidth + margin), y: y1 },
+        { x: bottomRowX, y: y2 }
+      ]
     }
     
     this.gameState.round.balloons.forEach((balloon, index) => {
@@ -653,7 +605,15 @@ export class GameScene extends Phaser.Scene {
     const isCorrect = checkBalloon(this.gameState.round, balloonId)
     
     if (!isCorrect) {
-      this.handleWrongBalloon(balloonId)
+      // Only handle visual/audio feedback, wrongAttempts already incremented in clickBalloon
+      const balloon = this.balloonSprites.find(b => b.id === balloonId)
+      if (balloon) {
+        balloon.isBouncing = true
+        balloon.bounceStartTime = this.time.now
+        this.playSound('boing')
+      }
+      this.playSound('meow')
+      this.showFeedback(WRONG_ANSWER_MESSAGE)
     }
   }
 
@@ -1080,9 +1040,27 @@ export class GameScene extends Phaser.Scene {
       return
     }
     
+    // If already walking to a balloon, treat additional click as input during action
+    if (this.pendingJumpBalloonId) {
+      const isCorrect = checkBalloon(this.gameState.round, balloonId)
+      if (!isCorrect) {
+        this.gameState.round = handleWrongAttempt(this.gameState.round)
+        this.updateUI()
+      }
+      return
+    }
+    
     const balloonCenterX = balloon.x
     this.catTargetX = balloonCenterX
     this.pendingJumpBalloonId = balloonId
+    
+    // Immediately check if this is a wrong balloon and increment attempts
+    // This ensures rapid clicks on wrong balloons are counted even if animation hasn't started
+    const isCorrect = checkBalloon(this.gameState.round, balloonId)
+    if (!isCorrect) {
+      this.gameState.round = handleWrongAttempt(this.gameState.round)
+      this.updateUI()
+    }
   }
 
   public pressKey(key: 'left' | 'right' | 'space' | 'up') {

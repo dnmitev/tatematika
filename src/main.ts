@@ -2,6 +2,7 @@ import Phaser from 'phaser'
 import { loadSettings } from './game-logic/settings'
 import { GameScene } from './scenes/GameScene'
 import { LevelCompleteScene } from './scenes/LevelCompleteScene'
+import { setRoundRng as setRoundRngInternal } from './game-logic/round'
 
 /**
  * Test hook API for Playwright e2e tests
@@ -248,6 +249,11 @@ window.__tatematika = {
   
   getGame() {
     return game
+  },
+  
+  // K17 CONTRACT: Controlled RNG for deterministic shuffle
+  setRoundRng(rngFn: () => number) {
+    setRoundRngInternal(rngFn)
   }
 }
 
