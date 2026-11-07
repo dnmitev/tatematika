@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS } from './test-timeouts'
+import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS, multiRoundTestTimeout } from './test-timeouts'
 import { getCatPaintedBounds } from './helpers'
 
 /**
@@ -282,8 +282,10 @@ for (const vp of viewports) {
     
     for (const count of [3, 4, 5]) {
       test(`Count ${count}: No balloons in jump corridor (10 rounds)`, async ({ page }) => {
+        const rounds = 10
+        test.setTimeout(multiRoundTestTimeout(rounds))
         await setBalloonCount(page, count)
-        await checkJumpCorridor(page, vp.name, count, 10)
+        await checkJumpCorridor(page, vp.name, count, rounds)
       })
     }
   })

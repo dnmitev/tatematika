@@ -21,3 +21,18 @@ export const ACTION_TIMEOUT_MS = 20000
  * Timeout for game initialization (window.__tatematika available)
  */
 export const INIT_TIMEOUT_MS = 5000
+
+/**
+ * Budget per round for multi-round tests
+ * ~1.3x the observed max 7.87s per round on slow headless Chromium
+ */
+export const ROUND_BUDGET_MS = 10000
+
+/**
+ * Calculate test timeout for multi-round tests
+ * @param rounds Number of rounds the test will play
+ * @returns Timeout in milliseconds (rounds * ROUND_BUDGET_MS + 30s buffer)
+ */
+export function multiRoundTestTimeout(rounds: number): number {
+  return rounds * ROUND_BUDGET_MS + 30000
+}
