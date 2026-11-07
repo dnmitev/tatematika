@@ -49,6 +49,7 @@ export class GameScene extends Phaser.Scene {
   
   private formulaFontSize: number = 32
   private targetFontSize: number = 32
+  private currentJumpHeight: number = 80
 
   constructor() {
     super({ key: 'GameScene' })
@@ -130,6 +131,41 @@ export class GameScene extends Phaser.Scene {
     this.catJumpStartY = this.catY
     this.cat = this.add.graphics()
     this.drawCat(this.cat, this.catX, this.catY)
+  }
+
+  private calculateJumpHeight(): number {
+    if (!this.balloonSprites || this.balloonSprites.length === 0) {
+      return 80
+    }
+    
+    const catEarsTop = this.catJumpStartY - 40
+    
+    const targetBalloon = this.balloonSprites.find(bs => 
+      this.gameState.round.balloons.find(b => b.id === bs.id && b.isCorrect)
+    )
+    
+    let minClearance = 80
+    
+    for (const bs of this.balloonSprites) {
+      if (!bs.sprite || !bs.sprite.input) continue
+      if (targetBalloon && bs.id === targetBalloon.id) continue
+      
+      const hitArea = bs.sprite.input.hitArea as Phaser.Geom.Ellipse
+      const balloonRadius = hitArea ? hitArea.height / 2 : 32
+      const balloonBottom = bs.y + balloonRadius
+      const clearance = catEarsTop - balloonBottom
+      
+      if (clearance > 0 && clearance < minClearance) {
+        minClearance = clearance
+      }
+    }
+    
+    const safetyMargin = 15
+    const minVisibleJump = 20
+    const maxJump = 80
+    const calculatedJump = Math.max(minVisibleJump, minClearance - safetyMargin)
+    
+    return Math.min(calculatedJump, maxJump)
   }
 
   private drawCat(graphics: Phaser.GameObjects.Graphics, x: number, y: number) {
@@ -404,24 +440,6 @@ export class GameScene extends Phaser.Scene {
       ]
     }
     
-    const jumpHeight = 80
-    const catRestingEarsTop = this.catJumpStartY - 40
-    const jumpPeakCatTop = catRestingEarsTop - jumpHeight
-    const balloonRadius = balloonHeight / 2
-    const safetyMargin = 15
-    const maxSafeBalloonBottom = jumpPeakCatTop - safetyMargin
-    
-    const currentLowestBottom = Math.max(...positions.map(p => p.y + balloonRadius))
-    if (currentLowestBottom > maxSafeBalloonBottom) {
-      const shiftNeeded = currentLowestBottom - maxSafeBalloonBottom
-      const currentHighestTop = Math.min(...positions.map(p => p.y - balloonRadius))
-      const targetHighestTop = currentHighestTop - shiftNeeded
-      
-      if (targetHighestTop >= hudTopSpace) {
-        positions = positions.map(p => ({ x: p.x, y: p.y - shiftNeeded }))
-      }
-    }
-    
     this.gameState.round.balloons.forEach((balloon, index) => {
       const { x, y } = positions[index]
 
@@ -452,6 +470,8 @@ export class GameScene extends Phaser.Scene {
         isPopping: false
       })
     })
+    
+    this.currentJumpHeight = this.calculateJumpHeight()
   }
 
   private drawBalloon(graphics: Phaser.GameObjects.Graphics, x: number, y: number, isCorrect: boolean, width: number, height: number) {
@@ -707,10 +727,9 @@ export class GameScene extends Phaser.Scene {
       const jumpDuration = 0.6
       
       if (this.catJumpTime < jumpDuration) {
-        const jumpHeight = 80
         const progress = this.catJumpTime / jumpDuration
         const arc = Math.sin(progress * Math.PI)
-        this.catY = this.catJumpStartY - arc * jumpHeight
+        this.catY = this.catJumpStartY - arc * this.currentJumpHeight
         this.drawCat(this.cat, this.catX, this.catY)
       } else {
         this.catIsJumping = false
@@ -756,10 +775,11 @@ export class GameScene extends Phaser.Scene {
           bs.sprite.alpha = 1
         }
 
-        const catTopY = this.catJumpStartY - 40
+        const catEarsTop = this.catJumpStartY - 40
+        const catTopDuringJump = catEarsTop - this.currentJumpHeight
         const balloonRadius = bs.sprite.input ? (bs.sprite.input.hitArea as Phaser.Geom.Ellipse).height / 2 : 50
         const resetMargin = 20
-        if (bs.y + balloonRadius > catTopY - resetMargin) {
+        if (bs.y + balloonRadius > catTopDuringJump - resetMargin) {
           this.gameState.round = resetBalloons(this.gameState.round)
           this.createBalloons()
         }
