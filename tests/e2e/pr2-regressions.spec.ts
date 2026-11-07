@@ -127,7 +127,8 @@ test.describe('PR #2 Review Regressions', () => {
           if (progress > 1) progress = 1
         }
         
-        // Get cat top edge (ears are at catY - 40 per drawCat)
+        // Get cat top edge from real rendered position
+        // Cat is Graphics object; ears drawn at catY - 40 (see drawCat in src)
         const catTop = scene.catY !== undefined ? scene.catY - 40 : null
         
         // Get balloon bounds (bottom edge)
@@ -175,12 +176,9 @@ test.describe('PR #2 Review Regressions', () => {
       return window.__k3Frames
     })
     
-    // Contact thresholds:
-    // - Progress: src detects contact at progress >= 0.5 (arc peak)  
-    // - Geometry: cat top reaches balloon within clearance distance
-    // src uses 80px minClearance in calculateJumpHeight, so we verify cat gets within that margin
-    const CONTACT_PROGRESS_THRESHOLD = 0.5
-    const CONTACT_TOLERANCE_PX = 85  // src clearance (80px) + small margin to account for balloon float
+    // Contact tolerance: spec requires balloon stays visible until cat reaches it
+    // "Reaches" means actual geometric contact, not progress-based approximation
+    const CONTACT_TOLERANCE_PX = 5  // Cat top within 5px of balloon bottom
     
     // Find jumping frames
     const jumpingFrames = frames.filter((f: any) => f.isJumping)
@@ -190,30 +188,26 @@ test.describe('PR #2 Review Regressions', () => {
     
     // Find geometric contact frame: first frame where cat top reaches balloon bottom
     let geometricContactFrameIndex = -1
+    let minGap = Infinity
     for (let i = 0; i < frames.length; i++) {
       const f = frames[i]
-      if (f.catTop !== null && f.balloonBottom !== null && 
-          f.catTop <= f.balloonBottom + CONTACT_TOLERANCE_PX) {
-        geometricContactFrameIndex = i
-        break
+      if (f.catTop !== null && f.balloonBottom !== null) {
+        const gap = f.catTop - f.balloonBottom
+        if (gap < minGap) {
+          minGap = gap
+        }
+        if (gap <= CONTACT_TOLERANCE_PX) {
+          geometricContactFrameIndex = i
+          break
+        }
       }
     }
     
-    expect(geometricContactFrameIndex, 'geometric contact not found - cat never reached balloon').toBeGreaterThan(-1)
+    expect(
+      geometricContactFrameIndex,
+      `cat never reached balloon: closest gap ${minGap.toFixed(1)}px (tolerance ${CONTACT_TOLERANCE_PX}px)`
+    ).toBeGreaterThan(-1)
     
-    // Find progress-based contact frame: first frame where jump progress >= 0.5
-    let progressContactFrameIndex = -1
-    for (let i = 0; i < frames.length; i++) {
-      const f = frames[i]
-      if (f.jumpProgress !== null && f.jumpProgress >= CONTACT_PROGRESS_THRESHOLD) {
-        progressContactFrameIndex = i
-        break
-      }
-    }
-    
-    expect(progressContactFrameIndex, 'progress contact not found - jump progress never reached 0.5').toBeGreaterThan(-1)
-    
-    // Use geometric contact as the authoritative contact frame (not circular with src)
     const contactFrameIndex = geometricContactFrameIndex
     const contactFrame = frames[contactFrameIndex]
     const framesBeforeContact = frames.slice(0, contactFrameIndex)
@@ -238,14 +232,15 @@ test.describe('PR #2 Review Regressions', () => {
       }
     }
     
+    // Assert: pop actually started
+    expect(popStartFrameIndex, 'pop never started').toBeGreaterThan(-1)
+    
     // Assert: pop starts at or after contact
-    if (popStartFrameIndex !== -1) {
-      const popStartFrame = frames[popStartFrameIndex]
-      expect(
-        popStartFrameIndex >= contactFrameIndex,
-        `pop started at frame ${popStartFrameIndex} (t=${popStartFrame.time}, progress=${popStartFrame.jumpProgress?.toFixed(2)}) BEFORE cat reached balloon at frame ${contactFrameIndex} (t=${contactFrame.time}, catTop=${contactFrame.catTop?.toFixed(1)}, balloonBottom=${contactFrame.balloonBottom?.toFixed(1)})`
-      ).toBe(true)
-    }
+    const popStartFrame = frames[popStartFrameIndex]
+    expect(
+      popStartFrameIndex >= contactFrameIndex,
+      `pop started at frame ${popStartFrameIndex} (t=${popStartFrame.time}, progress=${popStartFrame.jumpProgress?.toFixed(2)}) BEFORE cat reached balloon at frame ${contactFrameIndex} (t=${contactFrame.time}, catTop=${contactFrame.catTop?.toFixed(1)}, balloonBottom=${contactFrame.balloonBottom?.toFixed(1)})`
+    ).toBe(true)
   })
 
   test('K3: New balloons only appear after pop animation completes (~400ms)', async ({ page }) => {
@@ -406,6 +401,19 @@ test.describe('PR #2 Review Regressions', () => {
     const framesWithMissingOldBalloons = framesBeforePopEnd.filter((f: any) => 
       f.oldBalloonIds.length < oldBalloonIds.length
     )
+    
+    if (framesWithMissingOldBalloons.length > 0) {
+      // Log frame table for debugging
+      console.log('\n=== FRAME TABLE (pop animation frames) ===')
+      const relevantFrames = frames.slice(Math.max(0, popStartFrameIndex - 2), popEndFrameIndex + 5)
+      relevantFrames.forEach((f: any, i: number) => {
+        const actualIndex = Math.max(0, popStartFrameIndex - 2) + i
+        const marker = actualIndex === popStartFrameIndex ? ' <- POP START' : 
+                      actualIndex === popEndFrameIndex ? ' <- POP END' : ''
+        console.log(`[${actualIndex}] t=${f.time.toFixed(1)}ms isPopping=${f.targetIsPopping} alpha=${f.targetAlpha?.toFixed(3)} scaleX=${f.targetScaleX?.toFixed(3)} oldIds=${f.oldBalloonIds.length}/${oldBalloonIds.length} newIds=${f.newBalloonsCreated ? f.newBalloonsCreated.length : 0} stars=${f.stars}${marker}`)
+      })
+      console.log('=== END FRAME TABLE ===\n')
+    }
     
     expect(
       framesWithMissingOldBalloons.length,
