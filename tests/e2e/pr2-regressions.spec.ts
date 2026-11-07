@@ -236,80 +236,132 @@ test.describe('PR #2 Review Regressions', () => {
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
     // Install per-frame recorder tracking balloon IDs and pop state
-    await page.evaluate(({ targetId, oldIds }) => {
+    // Records until new round appears (stars increment) with 3s timeout
+    await page.evaluate(({ targetId, oldIds, initialStars }) => {
       const game = window.__tatematika!.getGame()
       const scene = game.scene.getScene('GameScene') as any
       const frames: any[] = []
       let prevBalloonIds: string[] = []
+      let recordingActive = false
+      let startTime: number | null = null
+      const MAX_RECORDING_MS = 3000
       
       const recordFrame = () => {
+        if (!recordingActive) return
+        if (startTime === null) {
+          startTime = scene.time.now
+          // Initialize prevBalloonIds on first frame
+          prevBalloonIds = scene.balloonSprites.map((b: any) => b.id).sort()
+        }
+        
+        const elapsed = scene.time.now - startTime
+        if (elapsed > MAX_RECORDING_MS) {
+          scene.events.off('postupdate', recordFrame)
+          recordingActive = false
+          return
+        }
+        
         const jumpState = window.__tatematika!.getCatJumpState()
         const bs = scene.balloonSprites.find((b: any) => b.id === targetId)
         const currentBalloonIds = scene.balloonSprites.map((b: any) => b.id).sort()
-        
-        const newBalloonsCreated = currentBalloonIds.filter((id: string) => !prevBalloonIds.includes(id))
+        const gameState = window.__tatematika!.getGameState()
+        // New balloons are those not in prevBalloonIds AND not in oldIds (truly new, not just initial)
+        const newBalloonsCreated = currentBalloonIds.filter((id: string) => 
+          !prevBalloonIds.includes(id) && !oldIds.includes(id)
+        )
         
         frames.push({
-          time: scene.time.now,
+          time: elapsed,
           isJumping: jumpState.isJumping,
           targetExists: !!bs,
           targetIsPopping: bs?.isPopping || false,
           targetAlpha: bs?.sprite?.alpha,
-          targetScale: bs?.sprite?.scaleX,
+          targetScaleX: bs?.sprite?.scaleX,
+          targetScaleY: bs?.sprite?.scaleY,
           balloonIds: currentBalloonIds,
           oldBalloonIds: oldIds.filter((id: string) => currentBalloonIds.includes(id)),
-          newBalloonsCreated: newBalloonsCreated.length > 0 ? newBalloonsCreated : null
+          newBalloonsCreated: newBalloonsCreated.length > 0 ? newBalloonsCreated : null,
+          stars: gameState.stars
         })
+        
+        // Stop when new round appears (stars increment)
+        if (gameState.stars > initialStars) {
+          scene.events.off('postupdate', recordFrame)
+          recordingActive = false
+        }
         
         prevBalloonIds = currentBalloonIds
       }
       
       scene.events.on('postupdate', recordFrame)
       window.__k3Frames = frames
-      window.__k3Stop = () => scene.events.off('postupdate', recordFrame)
-    }, { targetId: correctBalloon.id, oldIds: oldBalloonIds })
+      window.__k3StartRecording = () => { recordingActive = true }
+    }, { targetId: correctBalloon.id, oldIds: oldBalloonIds, initialStars: state.stars })
+    
+    // Start recording BEFORE click
+    await page.evaluate(() => (window as any).__k3StartRecording())
+    await page.waitForTimeout(10)
     
     // Click correct balloon
     await page.evaluate((id) => window.__tatematika!.clickBalloon(id), correctBalloon.id)
     
-    // Wait for jump to START
+    // Wait for new round to appear (stars increment) or 3s timeout
     await expect.poll(async () => {
-      const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-      return jumpState.isJumping
-    }, { timeout: 2000, intervals: [16] }).toBe(true)
+      const newState = await page.evaluate(() => window.__tatematika!.getGameState())
+      return newState.stars > state.stars
+    }, { timeout: 3000, intervals: [50] }).toBe(true)
     
-    // Wait 1.5s after pop should have started (600ms jump + 400ms pop + margin)
-    await page.waitForTimeout(1500)
+    // Get recorded frames
+    const frames = await page.evaluate(() => window.__k3Frames)
     
-    // Stop recording and analyze timeline
-    const frames = await page.evaluate(() => {
-      window.__k3Stop()
-      return window.__k3Frames
-    })
-    
-    // Find when pop ends: first frame where target is no longer popping OR no longer exists
-    let popEndFrameIndex = -1
+    // Find when pop starts: first frame where isPopping=true OR alpha/scale changes (animation begins)
+    let popStartFrameIndex = -1
     for (let i = 0; i < frames.length; i++) {
       const f = frames[i]
-      const prevWasPopping = i > 0 && frames[i - 1].targetIsPopping
-      if (prevWasPopping && (!f.targetIsPopping || !f.targetExists)) {
-        popEndFrameIndex = i
+      const prevF = i > 0 ? frames[i - 1] : null
+      
+      // Check if pop flag set
+      if (f.targetIsPopping && (!prevF || !prevF.targetIsPopping)) {
+        popStartFrameIndex = i
         break
       }
-    }
-    
-    // If pop never ended in recording, find last frame where target was popping
-    if (popEndFrameIndex === -1) {
-      for (let i = frames.length - 1; i >= 0; i--) {
-        if (frames[i].targetIsPopping) {
-          popEndFrameIndex = i
+      
+      // Check if alpha/scale animation started (observ able pop)
+      if (prevF && f.targetAlpha !== undefined && prevF.targetAlpha !== undefined) {
+        const alphaChanged = Math.abs(f.targetAlpha - prevF.targetAlpha) > 0.01
+        const scaleChanged = prevF.targetScaleX && f.targetScaleX && 
+                            Math.abs(f.targetScaleX - prevF.targetScaleX) > 0.01
+        if (alphaChanged || scaleChanged) {
+          popStartFrameIndex = i
           break
         }
       }
     }
     
-    expect(popEndFrameIndex, 'pop animation never started in recorded frames').toBeGreaterThan(-1)
+    expect(popStartFrameIndex, 'pop animation never started in recorded frames').toBeGreaterThan(-1)
     
+    // Find when pop ends: first frame where target is destroyed OR alpha near 0 (animation complete)
+    let popEndFrameIndex = -1
+    for (let i = popStartFrameIndex; i < frames.length; i++) {
+      const f = frames[i]
+      const prevF = i > 0 ? frames[i - 1] : null
+      
+      // Target destroyed
+      if (!f.targetExists && prevF && prevF.targetExists) {
+        popEndFrameIndex = i
+        break
+      }
+      
+      // Alpha near 0 (animation complete)
+      if (f.targetAlpha !== undefined && f.targetAlpha < 0.05) {
+        popEndFrameIndex = i
+        break
+      }
+    }
+    
+    expect(popEndFrameIndex, 'pop animation started but never ended').toBeGreaterThan(-1)
+    
+    const popStartTime = frames[popStartFrameIndex].time
     const popEndTime = frames[popEndFrameIndex].time
     
     // Find first frame where new balloon IDs appear
@@ -329,7 +381,7 @@ test.describe('PR #2 Review Regressions', () => {
     
     expect(
       framesWithMissingOldBalloons.length,
-      `old balloons removed before pop ended: ${framesWithMissingOldBalloons.length} frames had missing balloons before pop end at t=${popEndTime}`
+      `old balloons removed before pop ended: ${framesWithMissingOldBalloons.length} frames had missing balloons before pop end at t=${popEndTime.toFixed(1)}ms (pop started at t=${popStartTime.toFixed(1)}ms)`
     ).toBe(0)
     
     // Assert: new balloons only appear at or after pop end
@@ -339,7 +391,7 @@ test.describe('PR #2 Review Regressions', () => {
       
       expect(
         firstNewBalloonFrameIndex >= popEndFrameIndex,
-        `new balloons appeared at frame ${firstNewBalloonFrameIndex} (t=${firstNewBalloonTime}) BEFORE pop ended at frame ${popEndFrameIndex} (t=${popEndTime}), delta=${delta.toFixed(1)}ms`
+        `new balloons appeared at frame ${firstNewBalloonFrameIndex} (t=${firstNewBalloonTime.toFixed(1)}ms) BEFORE pop ended at frame ${popEndFrameIndex} (t=${popEndTime.toFixed(1)}ms), delta=${delta.toFixed(1)}ms`
       ).toBe(true)
     }
   })
