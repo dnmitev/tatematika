@@ -804,26 +804,8 @@ export class GameScene extends Phaser.Scene {
       }
     }
     
-    // After jump completes, check if pop animation has finished (400ms), then award star
-    if (!this.catIsJumping && this.popAnimationStartTime > 0 && !this.popAnimationCompleted) {
-      const popElapsed = time - this.popAnimationStartTime
-      if (popElapsed >= 400) {
-        this.popAnimationCompleted = true
-        this.popAnimationStartTime = 0
-        this.jumpTargetBalloonId = null
-        this.jumpContactMade = false
-        
-        this.gameState = addStar(this.gameState)
-
-        if (isLevelComplete(this.gameState)) {
-          this.showLevelComplete()
-        } else {
-          this.gameState.round = handleCorrectPop(this.gameState.round, this.gameState.settings)
-          this.createBalloons()
-          this.updateUI()
-        }
-      }
-    }
+    // Track if popping balloon finished rendering during balloon loop
+    let poppingBalloonFinishedRendering = false
     
     this.balloonSprites.forEach(bs => {
       if (bs.isBouncing && bs.bounceStartTime) {
@@ -848,6 +830,10 @@ export class GameScene extends Phaser.Scene {
         } else {
           bs.sprite.setVisible(false)
           bs.text.setVisible(false)
+          // Check if this is the target balloon that triggered the pop
+          if (bs.id === this.jumpTargetBalloonId && !this.popAnimationCompleted) {
+            poppingBalloonFinishedRendering = true
+          }
         }
       } else if (!bs.isPopping) {
         if (!this.catIsJumping) {
@@ -874,6 +860,24 @@ export class GameScene extends Phaser.Scene {
         }
       }
     })
+    
+    // After balloon rendering, check if popping balloon finished and proceed with new round atomically
+    if (poppingBalloonFinishedRendering && !this.catIsJumping && this.popAnimationStartTime > 0) {
+      this.popAnimationCompleted = true
+      this.popAnimationStartTime = 0
+      this.jumpTargetBalloonId = null
+      this.jumpContactMade = false
+      
+      this.gameState = addStar(this.gameState)
+
+      if (isLevelComplete(this.gameState)) {
+        this.showLevelComplete()
+      } else {
+        this.gameState.round = handleCorrectPop(this.gameState.round, this.gameState.settings)
+        this.createBalloons()
+        this.updateUI()
+      }
+    }
   }
 
   private toggleMute() {
