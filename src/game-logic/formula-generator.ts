@@ -106,6 +106,13 @@ export function generateRoundFormulas(
     }
   }
 
+  // Shuffle array using Fisher-Yates with injected RNG or Math.random
+  const random = rng ? () => rng.random() : () => Math.random()
+  for (let i = formulas.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1))
+    ;[formulas[i], formulas[j]] = [formulas[j], formulas[i]]
+  }
+
   return formulas
 }
 

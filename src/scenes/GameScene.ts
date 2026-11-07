@@ -419,6 +419,22 @@ export class GameScene extends Phaser.Scene {
       }
     }
     
+    // Ensure desktop proportions: aspect ratio should be in [0.75, 1.05] for desktop
+    // Desktop viewports: >= 1024px width
+    if (this.scale.width >= 1024) {
+      const currentAspect = balloonWidth / balloonHeight
+      if (currentAspect < 0.75) {
+        // Too tall, increase width
+        balloonWidth = balloonHeight * 0.75
+      } else if (currentAspect > 1.05) {
+        // Too wide, increase height
+        balloonHeight = balloonWidth / 1.05
+      }
+    }
+    
+    // Find the correct balloon index to ensure clear vertical corridor
+    const correctBalloonIndex = this.gameState.round.balloons.findIndex(b => b.isCorrect)
+    
     let positions: Array<{ x: number; y: number }> = []
     
     if (count <= 3) {
@@ -433,19 +449,24 @@ export class GameScene extends Phaser.Scene {
           y
         }))
       } else {
-        const x = availableWidth / 2
-        const totalHeight = count * balloonHeight + (count - 1) * margin
-        if (totalHeight > availableHeight) {
-          balloonHeight = Math.max(minTarget, (availableHeight - (count - 1) * margin) / count)
+        // Narrow viewport - shrink to fit in one row
+        // Single row = same Y for all, so no corridor conflicts
+        const maxWidthForRow = (availableWidth - (count + 1) * margin) / count
+        if (balloonWidth > maxWidthForRow) {
+          balloonWidth = Math.max(minTarget, maxWidthForRow)
         }
-        const finalTotalHeight = count * balloonHeight + (count - 1) * margin
-        const topMargin = (availableHeight - finalTotalHeight) / 2
+        
+        const totalWidth = count * balloonWidth + (count - 1) * margin
+        const startX = (availableWidth - totalWidth) / 2 + balloonWidth / 2
+        const y = hudTopSpace + availableHeight / 2
+        
         positions = Array.from({ length: count }, (_, i) => ({
-          x,
-          y: hudTopSpace + topMargin + i * (balloonHeight + margin) + balloonHeight / 2
+          x: startX + i * (balloonWidth + margin),
+          y
         }))
       }
     } else if (count === 4) {
+      // 2×2 grid layout
       const leftMargin = (availableWidth - (2 * balloonWidth + margin)) / 2
       const col1 = leftMargin + balloonWidth / 2
       const col2 = col1 + balloonWidth + margin
@@ -455,36 +476,86 @@ export class GameScene extends Phaser.Scene {
       const y1 = hudTopSpace + topMargin + balloonHeight / 2
       const y2 = y1 + balloonHeight + margin
       
-      positions = [
-        { x: col1, y: y1 },
-        { x: col2, y: y1 },
-        { x: col1, y: y2 },
-        { x: col2, y: y2 }
+      // Default grid: [TL, TR, BL, BR]
+      const gridPositions = [
+        { x: col1, y: y1 }, // 0: top-left
+        { x: col2, y: y1 }, // 1: top-right
+        { x: col1, y: y2 }, // 2: bottom-left
+        { x: col2, y: y2 }  // 3: bottom-right
       ]
-    } else {
       
-      const leftMargin = (availableWidth - (2 * balloonWidth + margin)) / 2
-      const col1 = leftMargin + balloonWidth / 2
-      const col2 = col1 + balloonWidth + margin
-      const colCenter = availableWidth / 2
-      
-      const totalHeight = 3 * balloonHeight + 2 * margin
-      if (totalHeight > availableHeight) {
-        balloonHeight = Math.max(minTarget, (availableHeight - 2 * margin) / 3)
+      // Place correct balloon on bottom row to ensure clear corridor
+      // Swap positions so correct balloon gets index 2 or 3 (bottom row)
+      if (correctBalloonIndex === 0) {
+        positions = [gridPositions[2], gridPositions[0], gridPositions[1], gridPositions[3]]
+      } else if (correctBalloonIndex === 1) {
+        positions = [gridPositions[0], gridPositions[2], gridPositions[1], gridPositions[3]]
+      } else if (correctBalloonIndex === 2) {
+        positions = [gridPositions[0], gridPositions[1], gridPositions[2], gridPositions[3]]
+      } else {
+        positions = [gridPositions[0], gridPositions[1], gridPositions[2], gridPositions[3]]
       }
-      const finalTotalHeight = 3 * balloonHeight + 2 * margin
+    } else {
+      // Count 5: Use 2-row layout to ensure clear corridor
+      // Place correct balloon on bottom row, other 4 on top row
+      
+      // Try to fit 4 balloons in top row
+      const topRowCount = 4
+      const bottomRowCount = 1
+      
+      const maxWidthForTopRow = (availableWidth - (topRowCount + 1) * margin) / topRowCount
+      if (balloonWidth > maxWidthForTopRow) {
+        balloonWidth = Math.max(minTarget, maxWidthForTopRow)
+      }
+      
+      const totalHeight = 2 * balloonHeight + margin
+      if (totalHeight > availableHeight) {
+        balloonHeight = Math.max(minTarget, (availableHeight - margin) / 2)
+      }
+      
+      // Ensure desktop proportions for count 5 after sizing
+      if (this.scale.width >= 1024) {
+        const currentAspect = balloonWidth / balloonHeight
+        if (currentAspect > 1.05) {
+          // Too wide, increase height to fix ratio
+          balloonHeight = balloonWidth / 1.05
+        } else if (currentAspect < 0.75) {
+          // Too tall, increase width to fix ratio
+          balloonWidth = balloonHeight * 0.75
+        }
+      }
+      
+      const finalTotalHeight = 2 * balloonHeight + margin
       const topMargin = (availableHeight - finalTotalHeight) / 2
       const y1 = hudTopSpace + topMargin + balloonHeight / 2
       const y2 = y1 + balloonHeight + margin
-      const y3 = y2 + balloonHeight + margin
       
-      positions = [
-        { x: colCenter, y: y1 },
-        { x: col1, y: y2 },
-        { x: col2, y: y2 },
-        { x: col1, y: y3 },
-        { x: col2, y: y3 }
-      ]
+      // Top row: 4 balloons evenly spaced
+      const topRowTotalWidth = topRowCount * balloonWidth + (topRowCount - 1) * margin
+      const topRowStartX = (availableWidth - topRowTotalWidth) / 2 + balloonWidth / 2
+      
+      // Bottom row: 1 balloon centered
+      const bottomRowX = availableWidth / 2
+      
+      const topRowPositions = Array.from({ length: topRowCount }, (_, i) => ({
+        x: topRowStartX + i * (balloonWidth + margin),
+        y: y1
+      }))
+      
+      const bottomRowPosition = { x: bottomRowX, y: y2 }
+      
+      // Place correct balloon on bottom row
+      // All other balloons go to top row
+      positions = []
+      let topRowIndex = 0
+      for (let i = 0; i < count; i++) {
+        if (i === correctBalloonIndex) {
+          positions.push(bottomRowPosition)
+        } else {
+          positions.push(topRowPositions[topRowIndex])
+          topRowIndex++
+        }
+      }
     }
     
     this.gameState.round.balloons.forEach((balloon, index) => {
