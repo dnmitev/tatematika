@@ -1192,8 +1192,26 @@ test.describe('Pixel Ground-Truth Validation', () => {
     await page.goto('/?balloonCount=3')
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
     
-    // Wait for game to be stable
+    // Wait for game to be stable AND all balloons to be fully visible
     await page.waitForTimeout(500)
+    
+    // Wait until all balloons are fully spawned and visible
+    await page.waitForFunction(() => {
+      const game = (window as any).__tatematika!.getGame()
+      const scene = game.scene.getScene('GameScene') as any
+      if (!scene || !scene.balloonSprites) return false
+      
+      // Check all balloons are visible, on-canvas, and fully opaque
+      return scene.balloonSprites.every((bs: any) => {
+        if (!bs.sprite || !bs.sprite.visible || bs.sprite.alpha < 1) return false
+        
+        // Check balloon is within canvas bounds (with margin)
+        const canvas = game.canvas
+        const margin = 50
+        return bs.x > margin && bs.x < canvas.width - margin &&
+               bs.y > margin && bs.y < canvas.height - margin
+      })
+    }, { timeout: 5000 })
     
     // Get scale info
     const scaleInfo = await page.evaluate(() => {
@@ -1205,202 +1223,194 @@ test.describe('Pixel Ground-Truth Validation', () => {
         gameHeight: game.scale.height,
         cssWidth: rect.width,
         cssHeight: rect.height,
-        scale: rect.width / game.scale.width
+        scale: rect.width / game.scale.width,
+        devicePixelRatio: window.devicePixelRatio || 1
       }
     })
     
-    // Capture screenshots with retries
-    let captureResult: { png1: any; png2: any; balloons: any[]; positionsBefore: any[]; positionsAfter: any[] } | null = null
-    let captureAttempt = 0
-    const maxRetries = 10
-    
-    while (captureAttempt < maxRetries && !captureResult) {
-      captureAttempt++
+    // Single attempt with proper render-without-update
+    const captureData = await page.evaluate(async () => {
+      const game = window.__tatematika!.getGame()
+      const scene = game.scene.getScene('GameScene') as any
       
-      // Freeze and prepare for first screenshot
-      const prepResult = await page.evaluate(async () => {
-        const game = window.__tatematika!.getGame()
-        const scene = game.scene.getScene('GameScene') as any
-        
-        const getPositions = () => scene.balloonSprites.map((bs: any) => ({
-          id: bs.id,
-          x: bs.x,
-          y: bs.y
-        }))
-        
-        // Freeze everything
-        scene.tweens.pauseAll()
-        scene.time.paused = true
-        if (scene.physics) scene.physics.pause()
-        game.loop.sleep()
-        
-        await new Promise(resolve => setTimeout(resolve, 300))
-        
-        const positionsBefore = getPositions()
-        
-        // Force render with balloons visible
-        game.loop.wake()
-        game.loop.step(performance.now())
-        game.loop.sleep()
-        
-        // Wait for 4 RAF
-        await new Promise(resolve => 
+      const getBalloonBounds = () => scene.balloonSprites.map((bs: any) => ({
+        id: bs.id,
+        worldX: bs.x,
+        worldY: bs.y,
+        displayX: bs.sprite.x,
+        displayY: bs.sprite.y
+      }))
+      
+      // Freeze everything
+      scene.tweens.pauseAll()
+      scene.time.paused = true
+      if (scene.physics) scene.physics.pause()
+      game.loop.sleep()
+      
+      // Wait for settle
+      await new Promise(resolve => setTimeout(resolve, 200))
+      
+      const boundsBefore = getBalloonBounds()
+      
+      // Render WITHOUT stepping (Phaser 3.80 API)
+      // Keep game loop asleep, manually render the scene
+      const renderer = game.renderer
+      const camera = scene.cameras.main
+      
+      renderer.preRender()
+      scene.sys.render(renderer, scene.children, camera)
+      renderer.postRender()
+      
+      // Wait for render to paint
+      await new Promise(resolve => 
+        requestAnimationFrame(() => 
           requestAnimationFrame(() => 
             requestAnimationFrame(() => 
-              requestAnimationFrame(() => 
-                requestAnimationFrame(resolve)))))
-        
-        return { positionsBefore }
-      })
+              requestAnimationFrame(resolve)))))
       
-      // Take screenshot 1 with Playwright (works with WebGL!)
-      const screenshot1 = await page.locator('canvas').screenshot()
+      const boundsAfterFirst = getBalloonBounds()
       
-      // Get balloon data and hide for second screenshot
-      const balloonData = await page.evaluate(async () => {
-        const game = window.__tatematika!.getGame()
-        const scene = game.scene.getScene('GameScene') as any
+      return { boundsBefore, boundsAfterFirst }
+    })
+    
+    // Take screenshot 1 with Playwright
+    const screenshot1 = await page.locator('canvas').screenshot()
+    
+    // Get balloon geometry and hide for second screenshot
+    const balloonData = await page.evaluate(async () => {
+      const game = window.__tatematika!.getGame()
+      const scene = game.scene.getScene('GameScene') as any
+      
+      const getBalloonBounds = () => scene.balloonSprites.map((bs: any) => ({
+        id: bs.id,
+        worldX: bs.x,
+        worldY: bs.y,
+        displayX: bs.sprite.x,
+        displayY: bs.sprite.y
+      }))
+      
+      // Get balloon commandBuffer geometry
+      const balloons = scene.balloonSprites.map((bs: any) => {
+        const sprite = bs.sprite as any
+        const commandBuffer = sprite.commandBuffer
         
-        const getPositions = () => scene.balloonSprites.map((bs: any) => ({
-          id: bs.id,
-          x: bs.x,
-          y: bs.y
-        }))
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+        const Commands = { MOVE_TO: 5, LINE_TO: 4, FILL_PATH: 8 }
+        let currentPath: Array<{ x: number; y: number }> = []
         
-        // Get balloon commandBuffer geometry
-        const balloons = scene.balloonSprites.map((bs: any) => {
-          const sprite = bs.sprite as any
-          const commandBuffer = sprite.commandBuffer
-          
-          let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
-          const Commands = { MOVE_TO: 5, LINE_TO: 4, FILL_PATH: 8 }
-          let currentPath: Array<{ x: number; y: number }> = []
-          
-          let i = 0
-          while (i < commandBuffer.length) {
-            const cmd = commandBuffer[i++]
-            if (cmd === Commands.MOVE_TO || cmd === Commands.LINE_TO) {
-              currentPath.push({ x: commandBuffer[i], y: commandBuffer[i + 1] })
-              i += 2
-            } else if (cmd === Commands.FILL_PATH) {
-              for (const p of currentPath) {
-                minX = Math.min(minX, p.x)
-                maxX = Math.max(maxX, p.x)
-                minY = Math.min(minY, p.y)
-                maxY = Math.max(maxY, p.y)
-              }
-              currentPath = []
-            } else if (cmd >= 0 && cmd <= 2) {
-              // no args
-            } else if (cmd === 6) {
-              i += 3
-            } else if (cmd === 7) {
-              i += 2
-            } else if (cmd === 0) {
-              i += 6
-            } else if (cmd === 10) {
-              i += 6
+        let i = 0
+        while (i < commandBuffer.length) {
+          const cmd = commandBuffer[i++]
+          if (cmd === Commands.MOVE_TO || cmd === Commands.LINE_TO) {
+            currentPath.push({ x: commandBuffer[i], y: commandBuffer[i + 1] })
+            i += 2
+          } else if (cmd === Commands.FILL_PATH) {
+            for (const p of currentPath) {
+              minX = Math.min(minX, p.x)
+              maxX = Math.max(maxX, p.x)
+              minY = Math.min(minY, p.y)
+              maxY = Math.max(maxY, p.y)
             }
+            currentPath = []
+          } else if (cmd >= 0 && cmd <= 2) {
+            // no args
+          } else if (cmd === 6) {
+            i += 3
+          } else if (cmd === 7) {
+            i += 2
+          } else if (cmd === 0) {
+            i += 6
+          } else if (cmd === 10) {
+            i += 6
           }
-          
-          const scaleX = sprite.scaleX || 1
-          const scaleY = sprite.scaleY || 1
-          const effectiveWidth = (maxX - minX) * scaleX
-          const effectiveHeight = (maxY - minY) * scaleY
-          
-          return {
-            id: bs.id,
-            centerX: bs.x,
-            centerY: bs.y,
-            radiusX: effectiveWidth / 2,
-            radiusY: effectiveHeight / 2
-          }
-        })
-        
-        // Hide balloons
-        for (const bs of scene.balloonSprites) {
-          bs.sprite.setVisible(false)
         }
         
-        // Force render without balloons
-        game.loop.wake()
-        game.loop.step(performance.now())
-        game.loop.sleep()
+        const scaleX = sprite.scaleX || 1
+        const scaleY = sprite.scaleY || 1
+        const effectiveWidth = (maxX - minX) * scaleX
+        const effectiveHeight = (maxY - minY) * scaleY
         
-        // Wait for 4 RAF
-        await new Promise(resolve => 
+        return {
+          id: bs.id,
+          centerX: bs.x,
+          centerY: bs.y,
+          radiusX: effectiveWidth / 2,
+          radiusY: effectiveHeight / 2,
+          visible: bs.sprite.visible,
+          alpha: bs.sprite.alpha
+        }
+      })
+      
+      // Hide balloons
+      for (const bs of scene.balloonSprites) {
+        bs.sprite.setVisible(false)
+      }
+      
+      // Render WITHOUT stepping
+      const renderer = game.renderer
+      const camera = scene.cameras.main
+      
+      renderer.preRender()
+      scene.sys.render(renderer, scene.children, camera)
+      renderer.postRender()
+      
+      // Wait for render to paint
+      await new Promise(resolve => 
+        requestAnimationFrame(() => 
           requestAnimationFrame(() => 
             requestAnimationFrame(() => 
-              requestAnimationFrame(() => 
-                requestAnimationFrame(resolve)))))
-        
-        const positionsAfter = getPositions()
-        
-        return { balloons, positionsAfter }
-      })
+              requestAnimationFrame(resolve)))))
       
-      // Take screenshot 2 with Playwright
-      const screenshot2 = await page.locator('canvas').screenshot()
+      const boundsAfterSecond = getBalloonBounds()
       
-      // Restore game
-      await page.evaluate(() => {
-        const game = window.__tatematika!.getGame()
-        const scene = game.scene.getScene('GameScene') as any
-        
-        for (const bs of scene.balloonSprites) {
-          bs.sprite.setVisible(true)
-        }
-        scene.tweens.resumeAll()
-        scene.time.paused = false
-        if (scene.physics) scene.physics.resume()
-        game.loop.wake()
-      })
+      return { balloons, boundsAfterSecond }
+    })
+    
+    // Take screenshot 2 with Playwright
+    const screenshot2 = await page.locator('canvas').screenshot()
+    
+    // Restore game
+    await page.evaluate(() => {
+      const game = window.__tatematika!.getGame()
+      const scene = game.scene.getScene('GameScene') as any
       
-      // Verify positions stayed stable
-      let allStable = true
-      for (let i = 0; i < prepResult.positionsBefore.length; i++) {
-        const before = prepResult.positionsBefore[i]
-        const after = balloonData.positionsAfter[i]
-        
-        if (Math.abs(before.x - after.x) > 3.0 || Math.abs(before.y - after.y) > 3.0) {
-          allStable = false
-          break
-        }
+      for (const bs of scene.balloonSprites) {
+        bs.sprite.setVisible(true)
       }
+      scene.tweens.resumeAll()
+      scene.time.paused = false
+      if (scene.physics) scene.physics.resume()
+      game.loop.wake()
+    })
+    
+    // Verify positions stayed stable (<=0.5px tolerance)
+    const allBounds = [
+      ...captureData.boundsBefore,
+      ...captureData.boundsAfterFirst,
+      ...balloonData.boundsAfterSecond
+    ]
+    
+    for (let i = 0; i < captureData.boundsBefore.length; i++) {
+      const before = captureData.boundsBefore[i]
+      const afterFirst = captureData.boundsAfterFirst[i]
+      const afterSecond = balloonData.boundsAfterSecond[i]
       
-      if (allStable) {
-        // Decode Playwright screenshots
-        const png1 = PNG.sync.read(screenshot1)
-        const png2 = PNG.sync.read(screenshot2)
-        
-        captureResult = {
-          png1,
-          png2,
-          balloons: balloonData.balloons,
-          positionsBefore: prepResult.positionsBefore,
-          positionsAfter: balloonData.positionsAfter
-        }
-      } else if (captureAttempt < maxRetries) {
-        await page.waitForTimeout(200)
-      }
+      const driftFirst = Math.max(
+        Math.abs(before.worldX - afterFirst.worldX),
+        Math.abs(before.worldY - afterFirst.worldY)
+      )
+      const driftSecond = Math.max(
+        Math.abs(before.worldX - afterSecond.worldX),
+        Math.abs(before.worldY - afterSecond.worldY)
+      )
+      
+      expect(driftFirst, `Balloon ${before.id} stayed frozen during first capture`).toBeLessThanOrEqual(0.5)
+      expect(driftSecond, `Balloon ${before.id} stayed frozen during second capture`).toBeLessThanOrEqual(0.5)
     }
     
-    if (!captureResult) {
-      throw new Error(`Failed to capture stable balloon positions after ${maxRetries} attempts`)
-    }
-    
-    const { png1, png2, balloons, positionsBefore, positionsAfter } = captureResult
-    
-    // Log position stability
-    for (let i = 0; i < positionsBefore.length; i++) {
-      const before = positionsBefore[i]
-      const after = positionsAfter[i]
-      const deltaX = Math.abs(before.x - after.x)
-      const deltaY = Math.abs(before.y - after.y)
-      if (deltaX > 0.1 || deltaY > 0.1) {
-        console.log(`Balloon ${before.id}: position drift (${deltaX.toFixed(2)}px, ${deltaY.toFixed(2)}px)`)
-      }
-    }
+    // Decode Playwright screenshots
+    const png1 = PNG.sync.read(screenshot1)
+    const png2 = PNG.sync.read(screenshot2)
     
     expect(png1.width).toBe(png2.width)
     expect(png1.height).toBe(png2.height)
@@ -1427,18 +1437,59 @@ test.describe('Pixel Ground-Truth Validation', () => {
     }
     
     // Convert balloons to CSS pixel ellipses
-    const ellipsesCSS = balloons.map((b: any) => ({
+    const ellipsesCSS = balloonData.balloons.map((b: any) => ({
       centerX: b.centerX * scaleInfo.scale,
       centerY: b.centerY * scaleInfo.scale,
       radiusX: b.radiusX * scaleInfo.scale,
       radiusY: b.radiusY * scaleInfo.scale,
       width: b.radiusX * 2 * scaleInfo.scale + 3,
       height: b.radiusY * 2 * scaleInfo.scale + 3,
-      id: b.id
+      id: b.id,
+      visible: b.visible,
+      alpha: b.alpha
     }))
     
     // Validate pixel-ellipse match
     const validation = validatePixelEllipseMatch(diff, png1.width, png1.height, ellipsesCSS, scaleInfo.scale)
+    
+    // Check for balloons with 0 pixels and save artifacts
+    const failedBalloons = validation.balloonMatches.filter(m => m.pixelCount === 0)
+    if (failedBalloons.length > 0) {
+      const fs = await import('fs')
+      const path = await import('path')
+      const artifactDir = `/opt/cursor/artifacts/pixel-fail-${Date.now()}`
+      await fs.promises.mkdir(artifactDir, { recursive: true })
+      
+      // Save screenshots
+      await fs.promises.writeFile(path.join(artifactDir, 'screenshot1.png'), screenshot1)
+      await fs.promises.writeFile(path.join(artifactDir, 'screenshot2.png'), screenshot2)
+      
+      // Save diff mask
+      const diffPng = new PNG({ width: png1.width, height: png1.height })
+      diffPng.data = Buffer.from(diff)
+      await fs.promises.writeFile(path.join(artifactDir, 'diff.png'), PNG.sync.write(diffPng))
+      
+      // Save debug info
+      const debugInfo = {
+        scaleInfo,
+        balloons: ellipsesCSS,
+        failedBalloons: failedBalloons.map(m => ({
+          id: m.id,
+          visible: ellipsesCSS.find((e: any) => e.id === m.id)?.visible,
+          alpha: ellipsesCSS.find((e: any) => e.id === m.id)?.alpha,
+          commandBox: m.commandBbox,
+          pixelBox: m.pixelBbox,
+          pixelCount: m.pixelCount
+        })),
+        allBounds
+      }
+      await fs.promises.writeFile(
+        path.join(artifactDir, 'debug.json'),
+        JSON.stringify(debugInfo, null, 2)
+      )
+      
+      throw new Error(`Balloon(s) with 0 pixels detected. Artifacts saved to: ${artifactDir}. Failed: ${failedBalloons.map(m => m.id).join(', ')}`)
+    }
     
     // Assert unconditionally for EVERY balloon
     for (const match of validation.balloonMatches) {
@@ -1488,8 +1539,26 @@ test.describe('Pixel Ground-Truth Validation', () => {
     await page.goto('/?balloonCount=5')
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
     
-    // Wait for game to be stable
+    // Wait for game to be stable AND all balloons to be fully visible
     await page.waitForTimeout(500)
+    
+    // Wait until all balloons are fully spawned and visible
+    await page.waitForFunction(() => {
+      const game = (window as any).__tatematika!.getGame()
+      const scene = game.scene.getScene('GameScene') as any
+      if (!scene || !scene.balloonSprites) return false
+      
+      // Check all balloons are visible, on-canvas, and fully opaque
+      return scene.balloonSprites.every((bs: any) => {
+        if (!bs.sprite || !bs.sprite.visible || bs.sprite.alpha < 1) return false
+        
+        // Check balloon is within canvas bounds (with margin)
+        const canvas = game.canvas
+        const margin = 50
+        return bs.x > margin && bs.x < canvas.width - margin &&
+               bs.y > margin && bs.y < canvas.height - margin
+      })
+    }, { timeout: 5000 })
     
     // Get scale info
     const scaleInfo = await page.evaluate(() => {
@@ -1501,202 +1570,194 @@ test.describe('Pixel Ground-Truth Validation', () => {
         gameHeight: game.scale.height,
         cssWidth: rect.width,
         cssHeight: rect.height,
-        scale: rect.width / game.scale.width
+        scale: rect.width / game.scale.width,
+        devicePixelRatio: window.devicePixelRatio || 1
       }
     })
     
-    // Capture screenshots with retries
-    let captureResult: { png1: any; png2: any; balloons: any[]; positionsBefore: any[]; positionsAfter: any[] } | null = null
-    let captureAttempt = 0
-    const maxRetries = 10
-    
-    while (captureAttempt < maxRetries && !captureResult) {
-      captureAttempt++
+    // Single attempt with proper render-without-update
+    const captureData = await page.evaluate(async () => {
+      const game = window.__tatematika!.getGame()
+      const scene = game.scene.getScene('GameScene') as any
       
-      // Freeze and prepare for first screenshot
-      const prepResult = await page.evaluate(async () => {
-        const game = window.__tatematika!.getGame()
-        const scene = game.scene.getScene('GameScene') as any
-        
-        const getPositions = () => scene.balloonSprites.map((bs: any) => ({
-          id: bs.id,
-          x: bs.x,
-          y: bs.y
-        }))
-        
-        // Freeze everything
-        scene.tweens.pauseAll()
-        scene.time.paused = true
-        if (scene.physics) scene.physics.pause()
-        game.loop.sleep()
-        
-        await new Promise(resolve => setTimeout(resolve, 300))
-        
-        const positionsBefore = getPositions()
-        
-        // Force render with balloons visible
-        game.loop.wake()
-        game.loop.step(performance.now())
-        game.loop.sleep()
-        
-        // Wait for 4 RAF
-        await new Promise(resolve => 
+      const getBalloonBounds = () => scene.balloonSprites.map((bs: any) => ({
+        id: bs.id,
+        worldX: bs.x,
+        worldY: bs.y,
+        displayX: bs.sprite.x,
+        displayY: bs.sprite.y
+      }))
+      
+      // Freeze everything
+      scene.tweens.pauseAll()
+      scene.time.paused = true
+      if (scene.physics) scene.physics.pause()
+      game.loop.sleep()
+      
+      // Wait for settle
+      await new Promise(resolve => setTimeout(resolve, 200))
+      
+      const boundsBefore = getBalloonBounds()
+      
+      // Render WITHOUT stepping (Phaser 3.80 API)
+      // Keep game loop asleep, manually render the scene
+      const renderer = game.renderer
+      const camera = scene.cameras.main
+      
+      renderer.preRender()
+      scene.sys.render(renderer, scene.children, camera)
+      renderer.postRender()
+      
+      // Wait for render to paint
+      await new Promise(resolve => 
+        requestAnimationFrame(() => 
           requestAnimationFrame(() => 
             requestAnimationFrame(() => 
-              requestAnimationFrame(() => 
-                requestAnimationFrame(resolve)))))
-        
-        return { positionsBefore }
-      })
+              requestAnimationFrame(resolve)))))
       
-      // Take screenshot 1 with Playwright (works with WebGL!)
-      const screenshot1 = await page.locator('canvas').screenshot()
+      const boundsAfterFirst = getBalloonBounds()
       
-      // Get balloon data and hide for second screenshot
-      const balloonData = await page.evaluate(async () => {
-        const game = window.__tatematika!.getGame()
-        const scene = game.scene.getScene('GameScene') as any
+      return { boundsBefore, boundsAfterFirst }
+    })
+    
+    // Take screenshot 1 with Playwright
+    const screenshot1 = await page.locator('canvas').screenshot()
+    
+    // Get balloon geometry and hide for second screenshot
+    const balloonData = await page.evaluate(async () => {
+      const game = window.__tatematika!.getGame()
+      const scene = game.scene.getScene('GameScene') as any
+      
+      const getBalloonBounds = () => scene.balloonSprites.map((bs: any) => ({
+        id: bs.id,
+        worldX: bs.x,
+        worldY: bs.y,
+        displayX: bs.sprite.x,
+        displayY: bs.sprite.y
+      }))
+      
+      // Get balloon commandBuffer geometry
+      const balloons = scene.balloonSprites.map((bs: any) => {
+        const sprite = bs.sprite as any
+        const commandBuffer = sprite.commandBuffer
         
-        const getPositions = () => scene.balloonSprites.map((bs: any) => ({
-          id: bs.id,
-          x: bs.x,
-          y: bs.y
-        }))
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+        const Commands = { MOVE_TO: 5, LINE_TO: 4, FILL_PATH: 8 }
+        let currentPath: Array<{ x: number; y: number }> = []
         
-        // Get balloon commandBuffer geometry
-        const balloons = scene.balloonSprites.map((bs: any) => {
-          const sprite = bs.sprite as any
-          const commandBuffer = sprite.commandBuffer
-          
-          let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
-          const Commands = { MOVE_TO: 5, LINE_TO: 4, FILL_PATH: 8 }
-          let currentPath: Array<{ x: number; y: number }> = []
-          
-          let i = 0
-          while (i < commandBuffer.length) {
-            const cmd = commandBuffer[i++]
-            if (cmd === Commands.MOVE_TO || cmd === Commands.LINE_TO) {
-              currentPath.push({ x: commandBuffer[i], y: commandBuffer[i + 1] })
-              i += 2
-            } else if (cmd === Commands.FILL_PATH) {
-              for (const p of currentPath) {
-                minX = Math.min(minX, p.x)
-                maxX = Math.max(maxX, p.x)
-                minY = Math.min(minY, p.y)
-                maxY = Math.max(maxY, p.y)
-              }
-              currentPath = []
-            } else if (cmd >= 0 && cmd <= 2) {
-              // no args
-            } else if (cmd === 6) {
-              i += 3
-            } else if (cmd === 7) {
-              i += 2
-            } else if (cmd === 0) {
-              i += 6
-            } else if (cmd === 10) {
-              i += 6
+        let i = 0
+        while (i < commandBuffer.length) {
+          const cmd = commandBuffer[i++]
+          if (cmd === Commands.MOVE_TO || cmd === Commands.LINE_TO) {
+            currentPath.push({ x: commandBuffer[i], y: commandBuffer[i + 1] })
+            i += 2
+          } else if (cmd === Commands.FILL_PATH) {
+            for (const p of currentPath) {
+              minX = Math.min(minX, p.x)
+              maxX = Math.max(maxX, p.x)
+              minY = Math.min(minY, p.y)
+              maxY = Math.max(maxY, p.y)
             }
+            currentPath = []
+          } else if (cmd >= 0 && cmd <= 2) {
+            // no args
+          } else if (cmd === 6) {
+            i += 3
+          } else if (cmd === 7) {
+            i += 2
+          } else if (cmd === 0) {
+            i += 6
+          } else if (cmd === 10) {
+            i += 6
           }
-          
-          const scaleX = sprite.scaleX || 1
-          const scaleY = sprite.scaleY || 1
-          const effectiveWidth = (maxX - minX) * scaleX
-          const effectiveHeight = (maxY - minY) * scaleY
-          
-          return {
-            id: bs.id,
-            centerX: bs.x,
-            centerY: bs.y,
-            radiusX: effectiveWidth / 2,
-            radiusY: effectiveHeight / 2
-          }
-        })
-        
-        // Hide balloons
-        for (const bs of scene.balloonSprites) {
-          bs.sprite.setVisible(false)
         }
         
-        // Force render without balloons
-        game.loop.wake()
-        game.loop.step(performance.now())
-        game.loop.sleep()
+        const scaleX = sprite.scaleX || 1
+        const scaleY = sprite.scaleY || 1
+        const effectiveWidth = (maxX - minX) * scaleX
+        const effectiveHeight = (maxY - minY) * scaleY
         
-        // Wait for 4 RAF
-        await new Promise(resolve => 
+        return {
+          id: bs.id,
+          centerX: bs.x,
+          centerY: bs.y,
+          radiusX: effectiveWidth / 2,
+          radiusY: effectiveHeight / 2,
+          visible: bs.sprite.visible,
+          alpha: bs.sprite.alpha
+        }
+      })
+      
+      // Hide balloons
+      for (const bs of scene.balloonSprites) {
+        bs.sprite.setVisible(false)
+      }
+      
+      // Render WITHOUT stepping
+      const renderer = game.renderer
+      const camera = scene.cameras.main
+      
+      renderer.preRender()
+      scene.sys.render(renderer, scene.children, camera)
+      renderer.postRender()
+      
+      // Wait for render to paint
+      await new Promise(resolve => 
+        requestAnimationFrame(() => 
           requestAnimationFrame(() => 
             requestAnimationFrame(() => 
-              requestAnimationFrame(() => 
-                requestAnimationFrame(resolve)))))
-        
-        const positionsAfter = getPositions()
-        
-        return { balloons, positionsAfter }
-      })
+              requestAnimationFrame(resolve)))))
       
-      // Take screenshot 2 with Playwright
-      const screenshot2 = await page.locator('canvas').screenshot()
+      const boundsAfterSecond = getBalloonBounds()
       
-      // Restore game
-      await page.evaluate(() => {
-        const game = window.__tatematika!.getGame()
-        const scene = game.scene.getScene('GameScene') as any
-        
-        for (const bs of scene.balloonSprites) {
-          bs.sprite.setVisible(true)
-        }
-        scene.tweens.resumeAll()
-        scene.time.paused = false
-        if (scene.physics) scene.physics.resume()
-        game.loop.wake()
-      })
+      return { balloons, boundsAfterSecond }
+    })
+    
+    // Take screenshot 2 with Playwright
+    const screenshot2 = await page.locator('canvas').screenshot()
+    
+    // Restore game
+    await page.evaluate(() => {
+      const game = window.__tatematika!.getGame()
+      const scene = game.scene.getScene('GameScene') as any
       
-      // Verify positions stayed stable
-      let allStable = true
-      for (let i = 0; i < prepResult.positionsBefore.length; i++) {
-        const before = prepResult.positionsBefore[i]
-        const after = balloonData.positionsAfter[i]
-        
-        if (Math.abs(before.x - after.x) > 3.0 || Math.abs(before.y - after.y) > 3.0) {
-          allStable = false
-          break
-        }
+      for (const bs of scene.balloonSprites) {
+        bs.sprite.setVisible(true)
       }
+      scene.tweens.resumeAll()
+      scene.time.paused = false
+      if (scene.physics) scene.physics.resume()
+      game.loop.wake()
+    })
+    
+    // Verify positions stayed stable (<=0.5px tolerance)
+    const allBounds = [
+      ...captureData.boundsBefore,
+      ...captureData.boundsAfterFirst,
+      ...balloonData.boundsAfterSecond
+    ]
+    
+    for (let i = 0; i < captureData.boundsBefore.length; i++) {
+      const before = captureData.boundsBefore[i]
+      const afterFirst = captureData.boundsAfterFirst[i]
+      const afterSecond = balloonData.boundsAfterSecond[i]
       
-      if (allStable) {
-        // Decode Playwright screenshots
-        const png1 = PNG.sync.read(screenshot1)
-        const png2 = PNG.sync.read(screenshot2)
-        
-        captureResult = {
-          png1,
-          png2,
-          balloons: balloonData.balloons,
-          positionsBefore: prepResult.positionsBefore,
-          positionsAfter: balloonData.positionsAfter
-        }
-      } else if (captureAttempt < maxRetries) {
-        await page.waitForTimeout(200)
-      }
+      const driftFirst = Math.max(
+        Math.abs(before.worldX - afterFirst.worldX),
+        Math.abs(before.worldY - afterFirst.worldY)
+      )
+      const driftSecond = Math.max(
+        Math.abs(before.worldX - afterSecond.worldX),
+        Math.abs(before.worldY - afterSecond.worldY)
+      )
+      
+      expect(driftFirst, `Balloon ${before.id} stayed frozen during first capture`).toBeLessThanOrEqual(0.5)
+      expect(driftSecond, `Balloon ${before.id} stayed frozen during second capture`).toBeLessThanOrEqual(0.5)
     }
     
-    if (!captureResult) {
-      throw new Error(`Failed to capture stable balloon positions after ${maxRetries} attempts`)
-    }
-    
-    const { png1, png2, balloons, positionsBefore, positionsAfter } = captureResult
-    
-    // Log position stability
-    for (let i = 0; i < positionsBefore.length; i++) {
-      const before = positionsBefore[i]
-      const after = positionsAfter[i]
-      const deltaX = Math.abs(before.x - after.x)
-      const deltaY = Math.abs(before.y - after.y)
-      if (deltaX > 0.1 || deltaY > 0.1) {
-        console.log(`Balloon ${before.id}: position drift (${deltaX.toFixed(2)}px, ${deltaY.toFixed(2)}px)`)
-      }
-    }
+    // Decode Playwright screenshots
+    const png1 = PNG.sync.read(screenshot1)
+    const png2 = PNG.sync.read(screenshot2)
     
     expect(png1.width).toBe(png2.width)
     expect(png1.height).toBe(png2.height)
@@ -1723,18 +1784,59 @@ test.describe('Pixel Ground-Truth Validation', () => {
     }
     
     // Convert balloons to CSS pixel ellipses
-    const ellipsesCSS = balloons.map((b: any) => ({
+    const ellipsesCSS = balloonData.balloons.map((b: any) => ({
       centerX: b.centerX * scaleInfo.scale,
       centerY: b.centerY * scaleInfo.scale,
       radiusX: b.radiusX * scaleInfo.scale,
       radiusY: b.radiusY * scaleInfo.scale,
       width: b.radiusX * 2 * scaleInfo.scale + 3,
       height: b.radiusY * 2 * scaleInfo.scale + 3,
-      id: b.id
+      id: b.id,
+      visible: b.visible,
+      alpha: b.alpha
     }))
     
     // Validate pixel-ellipse match
     const validation = validatePixelEllipseMatch(diff, png1.width, png1.height, ellipsesCSS, scaleInfo.scale)
+    
+    // Check for balloons with 0 pixels and save artifacts
+    const failedBalloons = validation.balloonMatches.filter(m => m.pixelCount === 0)
+    if (failedBalloons.length > 0) {
+      const fs = await import('fs')
+      const path = await import('path')
+      const artifactDir = `/opt/cursor/artifacts/pixel-fail-${Date.now()}`
+      await fs.promises.mkdir(artifactDir, { recursive: true })
+      
+      // Save screenshots
+      await fs.promises.writeFile(path.join(artifactDir, 'screenshot1.png'), screenshot1)
+      await fs.promises.writeFile(path.join(artifactDir, 'screenshot2.png'), screenshot2)
+      
+      // Save diff mask
+      const diffPng = new PNG({ width: png1.width, height: png1.height })
+      diffPng.data = Buffer.from(diff)
+      await fs.promises.writeFile(path.join(artifactDir, 'diff.png'), PNG.sync.write(diffPng))
+      
+      // Save debug info
+      const debugInfo = {
+        scaleInfo,
+        balloons: ellipsesCSS,
+        failedBalloons: failedBalloons.map(m => ({
+          id: m.id,
+          visible: ellipsesCSS.find((e: any) => e.id === m.id)?.visible,
+          alpha: ellipsesCSS.find((e: any) => e.id === m.id)?.alpha,
+          commandBox: m.commandBbox,
+          pixelBox: m.pixelBbox,
+          pixelCount: m.pixelCount
+        })),
+        allBounds
+      }
+      await fs.promises.writeFile(
+        path.join(artifactDir, 'debug.json'),
+        JSON.stringify(debugInfo, null, 2)
+      )
+      
+      throw new Error(`Balloon(s) with 0 pixels detected. Artifacts saved to: ${artifactDir}. Failed: ${failedBalloons.map(m => m.id).join(', ')}`)
+    }
     
     // Assert unconditionally for EVERY balloon
     for (const match of validation.balloonMatches) {
@@ -1779,6 +1881,6 @@ test.describe('Pixel Ground-Truth Validation', () => {
     })))
     console.log(`Coverage: ${validation.coveragePercent.toFixed(1)}% (${validation.coveredPixels}/${validation.totalChangedPixels} pixels)`)
   })
+
+
 })
-
-
