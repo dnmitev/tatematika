@@ -2,6 +2,28 @@ import { test, expect } from '@playwright/test'
 import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS, multiRoundTestTimeout } from './test-timeouts'
 import { popCorrectBalloonAndWait, getGameScaleAndRect } from './helpers'
 
+async function expectIdlePhase(page: any) {
+  const hasPhase = await page.evaluate(() => typeof window.__tatematika!.getActionPhase === 'function')
+  expect(hasPhase, 'getActionPhase hook must be implemented (docs/games/kote-balonche.md §4 rule 8)').toBe(true)
+  await expect.poll(async () => {
+    return page.evaluate(() => window.__tatematika!.getActionPhase!() === 'idle')
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
+}
+
+function startedSoundRecord() {
+  const oscs = (window as any).__audioInstrumentation?.oscillators || []
+  return oscs.filter((o: any) => {
+    const duration = o.scheduledDuration ?? (o.originalStopWhen - o.startWhen)
+    const audible = (o.gainCalls || []).some((g: any) => g.value > 0.001)
+    return o.startWhen >= 0 && duration > 0.05 && audible
+  }).map((o: any) => ({
+    startWhen: o.startWhen,
+    contextTime: o.startCallTime,
+    scheduledDuration: o.scheduledDuration ?? (o.originalStopWhen - o.startWhen),
+    peakGain: Math.max(0, ...(o.gainCalls || []).map((g: any) => g.value))
+  }))
+}
+
 /**
  * Regression tests for PR #2 review blockers
  * https://github.com/dnmitev/tatematika/pull/2#issuecomment-6701632601
@@ -941,6 +963,8 @@ test.describe('PR #2 Review Regressions', () => {
   })
 
   test('K10: Mute stops sounds that are already playing or scheduled', async ({ page }) => {
+    // Two wrong answers: the sound under test, then a muted click after that action is idle.
+    test.setTimeout(multiRoundTestTimeout(2))
     // Spec K10: "всички звуци спират, докато не го натисне отново"
     // Regression: mute must stop sounds ALREADY playing or scheduled, not just block future calls
     // App creates new AudioContext per sound (GameScene.ts ~574) and schedules stop() in the future
@@ -1037,19 +1061,14 @@ test.describe('PR #2 Review Regressions', () => {
     
     await page.mouse.click(clickX, clickY)
     
-    const startedSounds = await page.evaluate(() => {
-      const oscs = (window as any).__audioInstrumentation?.oscillators || []
-      return oscs.filter((o: any) => {
-        const duration = o.scheduledDuration ?? (o.originalStopWhen - o.startWhen)
-        const audible = (o.gainCalls || []).some((g: any) => g.value > 0.001)
-        return o.startWhen >= 0 && duration > 0.05 && audible
-      }).map((o: any) => ({
-        startWhen: o.startWhen,
-        contextTime: o.startCallTime,
-        scheduledDuration: o.scheduledDuration ?? (o.originalStopWhen - o.startWhen),
-        peakGain: Math.max(0, ...(o.gainCalls || []).map((g: any) => g.value))
-      }))
-    })
+    // The boing/meow start at takeoff, which is after the walk. Poll the recorded
+    // schedule instead of reading it in the same turn as the click.
+    await expect.poll(async () => {
+      const sounds = await page.evaluate(startedSoundRecord)
+      return sounds.length
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBeGreaterThan(0)
+    
+    const startedSounds = await page.evaluate(startedSoundRecord)
     
     expect(
       startedSounds.length,
@@ -1089,30 +1108,45 @@ test.describe('PR #2 Review Regressions', () => {
       ).toBe(true)
     }
     
+    // The second click is a new choice. It must be sent only after the first action
+    // has finished, or §4 rule 8 ignores it and the error never increments.
+    await expectIdlePhase(page)
+    
+    const stillMuted = await page.evaluate(() => window.__tatematika!.isMuted())
+    expect(stillMuted, 'second click must happen while muted').toBe(true)
+    
     // Verify no NEW sounds start while muted (real click)
     const countBefore = await page.evaluate(() => 
       (window as any).__audioInstrumentation?.oscillators.length || 0)
     
-    // Get current wrong attempts count
     const wrongAttemptsBefore = await page.evaluate(() => window.__tatematika!.getGameState().wrongAttempts)
     
-    const wrongBalloon2 = state.balloons.find((b: any) => !b.isCorrect && b.id !== wrongBalloon.id)!
+    const stateAfterIdle = await page.evaluate(() => window.__tatematika!.getGameState())
+    const wrongBalloon2 = stateAfterIdle.balloons.find((b: any) => !b.isCorrect && b.id !== wrongBalloon.id)
+      || stateAfterIdle.balloons.find((b: any) => !b.isCorrect)!
+    const fresh = await page.evaluate(() => {
+      const game = window.__tatematika!.getGame()
+      const canvas = document.querySelector('canvas')!
+      const rect = canvas.getBoundingClientRect()
+      return {
+        left: rect.left,
+        top: rect.top,
+        scale: rect.width / game.scale.width
+      }
+    })
     const balloonBounds2 = await page.evaluate((id) => 
       window.__tatematika!.getBalloonBounds(id), wrongBalloon2.id)
     
-    const clickX2 = canvasRect.left + (balloonBounds2.x + balloonBounds2.width / 2) * scale
-    const clickY2 = canvasRect.top + (balloonBounds2.y + balloonBounds2.height / 2) * scale
+    const clickX2 = fresh.left + (balloonBounds2.x + balloonBounds2.width / 2) * fresh.scale
+    const clickY2 = fresh.top + (balloonBounds2.y + balloonBounds2.height / 2) * fresh.scale
     
     await page.mouse.click(clickX2, clickY2)
     
-    // Poll until cat arrives and error is counted (wrongAttempts increments)
     await expect.poll(async () => {
-      const currentAttempts = await page.evaluate(() => window.__tatematika!.getGameState().wrongAttempts)
-      return currentAttempts > wrongAttemptsBefore
-    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
+      return page.evaluate(() => window.__tatematika!.getGameState().wrongAttempts)
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(wrongAttemptsBefore + 1)
     
-    // Wait additional 100ms to ensure sounds would have played
-    await page.waitForTimeout(100)
+    await expectIdlePhase(page)
     
     const soundsAfterMute = await page.evaluate((before: number) => {
       const oscs = (window as any).__audioInstrumentation?.oscillators || []
@@ -1133,20 +1167,12 @@ test.describe('PR #2 Review Regressions', () => {
   // REGRESSION: Rapid taps during jump behavior consistency
   // ============================================================================
 
-  test('Rapid taps during jump: wrong tap consistency - either fully handled OR fully ignored', async ({ page }) => {
+  test('Rapid taps during jump: input during the action is ignored', async ({ page }) => {
     // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
     test.setTimeout(multiRoundTestTimeout(2))
-    // SPEC SAYS: Section 3 (Управление) describes click behavior but does NOT specify
-    // what happens when you click DURING a jump. Quote: "Клік върху балон: котето отива под него и скача"
-    // Section 4 says wrong balloon "отскача" but doesn't say if this applies during a jump.
-    // 
-    // SPEC IS AMBIGUOUS. Testing for consistency:
-    // A wrong tap during a jump must either be:
-    // 1. FULLY IGNORED (no wrongAttempts increment, no bounce, no sound), OR
-    // 2. FULLY HANDLED (wrongAttempts increments, balloon bounces, sound plays)
-    // 
-    // Current code path (GameScene ~839-849): clickBalloon during catIsJumping counts error without bounce/sound
-    // This test MUST FAIL on current src
+    // docs/games/kote-balonche.md §4 rule 8 / K13: after the cat accepts a balloon and is
+    // walking, jumping, or landing, every later choice is ignored. It is not an error,
+    // it does not bounce a balloon or play a sound, and it is not run after landing.
     
     // Instrument audio to count oscillator starts
     await page.addInitScript(() => {
@@ -1202,19 +1228,19 @@ test.describe('PR #2 Review Regressions', () => {
     // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
     await page.evaluate(() => {
       const game = window.__tatematika!.getGame()
-      const latch: Record<string, boolean> = {}
+      const counts: Record<string, number> = {}
       const onFrame = () => {
-        const current = (window as any).__bounceLatch as Record<string, boolean>
+        const current = (window as any).__bounceLatchCounts as Record<string, number>
         const scene = game.scene.getScene('GameScene') as any
         const sprites = scene?.balloonSprites || []
         for (const bs of sprites) {
           const anim = window.__tatematika!.getBalloonAnimationState(bs.id)
-          if (anim.isBouncing) current[bs.id] = true
-          if (bs.sprite && Math.abs(bs.sprite.y - bs.y) >= 2) current[bs.id] = true
+          const displaced = bs.sprite && Math.abs(bs.sprite.y - bs.y) >= 2
+          if (anim.isBouncing || displaced) current[bs.id] = (current[bs.id] || 0) + 1
         }
       }
       game.events.on('postrender', onFrame)
-      ;(window as any).__bounceLatch = latch
+      ;(window as any).__bounceLatchCounts = counts
     })
 
     await page.mouse.click(baselineClickX, baselineClickY)
@@ -1225,24 +1251,28 @@ test.describe('PR #2 Review Regressions', () => {
       return currentAttempts > baselineWrongAttemptsBefore
     }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
     
-    const baselineBounced = await page.evaluate((id) => {
-      return !!(window as any).__bounceLatch?.[id]
+    const baselineBounceCount = await page.evaluate((id) => {
+      return (window as any).__bounceLatchCounts?.[id] || 0
     }, baselineBalloon.id)
+    const baselineBounced = baselineBounceCount > 0
     
-    // Wait 100ms to ensure all sounds have started
-    await page.waitForTimeout(100)
+    await expect.poll(async () => {
+      const after = await page.evaluate(() => (window as any).__oscillatorStarts.length)
+      return after - baselineOscCountBefore
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBeGreaterThan(0)
     const baselineOscCountAfter = await page.evaluate(() => (window as any).__oscillatorStarts.length)
     const N = baselineOscCountAfter - baselineOscCountBefore
     
     expect(N, 'baseline: wrong tap must produce sounds').toBeGreaterThan(0)
     expect(baselineBounced, 'baseline: wrong tap must bounce').toBe(true)
     
-    // REAL SCENARIO: wrong tap A, poll isJumping, real tap wrong B
+    // A's click is a new choice, so the cat must be idle and the counter must be read
+    // after the baseline tap has already been counted.
+    await expectIdlePhase(page)
+    
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
     const wrongBalloons = state.balloons.filter((b: any) => !b.isCorrect)
-    const initialWrongAttempts = state.wrongAttempts
     
-    // Pick a far wrong balloon for longer jump
     const catPos = await page.evaluate(() => window.__tatematika!.getCatPosition())
     let balloonA = wrongBalloons[0]
     let maxDist = 0
@@ -1260,16 +1290,12 @@ test.describe('PR #2 Review Regressions', () => {
     
     const balloonB = wrongBalloons.find((b: any) => b.id !== balloonA.id)!
     
-    await expect.poll(async () => {
-      const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-      return !jumpState.isJumping
-    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
-    
     const boundsA = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), balloonA.id)
     const clickXA = canvasRect.left + (boundsA.x + boundsA.width / 2) * scale
     const clickYA = canvasRect.top + (boundsA.y + boundsA.height / 2) * scale
     
-    const oscCountBeforeScenario = await page.evaluate(() => (window as any).__oscillatorStarts.length)
+    const preA = await page.evaluate(() => window.__tatematika!.getGameState().wrongAttempts)
+    const oscCountBeforeA = await page.evaluate(() => (window as any).__oscillatorStarts.length)
     await page.mouse.click(clickXA, clickYA)
     
     // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
@@ -1278,89 +1304,46 @@ test.describe('PR #2 Review Regressions', () => {
       return jumpState.isJumping
     }, { timeout: ACTION_TIMEOUT_MS, intervals: [10] }).toBe(true)
     
-    // NOW click wrong balloon B while jumping
-    const boundsB = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), balloonB.id)
-    const clickXB = canvasRect.left + (boundsB.x + boundsB.width / 2) * scale
-    const clickYB = canvasRect.top + (boundsB.y + boundsB.height / 2) * scale
-    
-    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
-    await page.evaluate((id) => {
-      delete (window as any).__bounceLatch[id]
-    }, balloonB.id)
-    await page.mouse.click(clickXB, clickYB)
-    
-    // Immediately verify tap happened WHILE jumping
-    const wasJumpingDuringTap = await page.evaluate(() => window.__tatematika!.getCatJumpState().isJumping)
-    expect(wasJumpingDuringTap, 'tap on B must have occurred while isJumping was true').toBe(true)
-    
-    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
-    // Wait for jump to complete
-    await expect.poll(async () => {
-      const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-      return !jumpState.isJumping
-    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe(true)
-    
-    // timing: spec sets no duration (docs/games/kote-balonche.md); see tate-dev k22 evidence
-    // Poll until wrongAttempts stabilizes (no changes for 100ms), indicating all jumps are done
-    let lastWrongAttempts = await page.evaluate(() => window.__tatematika!.getGameState().wrongAttempts)
-    let stableCount = 0
-    const maxWaitMs = ACTION_TIMEOUT_MS
-    const checkIntervalMs = 50
-    let totalWaitMs = 0
-    
-    while (stableCount < 2 && totalWaitMs < maxWaitMs) {
-      await page.waitForTimeout(checkIntervalMs)
-      totalWaitMs += checkIntervalMs
-      const currentWrongAttempts = await page.evaluate(() => window.__tatematika!.getGameState().wrongAttempts)
-      if (currentWrongAttempts === lastWrongAttempts) {
-        stableCount++
-      } else {
-        stableCount = 0
-        lastWrongAttempts = currentWrongAttempts
+    const pointB = await page.evaluate((id) => {
+      const latch = { seen: false, phase: null as string | null, isJumping: false }
+      const onPointer = () => {
+        if (latch.seen) return
+        latch.seen = true
+        const api = window.__tatematika!
+        latch.phase = typeof api.getActionPhase === 'function' ? api.getActionPhase() : null
+        latch.isJumping = api.getCatJumpState().isJumping
       }
-    }
-    
-    // Wait additional 100ms to ensure all sounds have started
-    await page.waitForTimeout(100)
-    
-    const balloonBBounced = await page.evaluate((id) => {
-      return !!(window as any).__bounceLatch?.[id]
+      window.addEventListener('pointerdown', onPointer, true)
+      ;(window as any).__bTapLatch = latch
+      ;(window as any).__bounceLatchCounts[id] = 0
+      const bounds = window.__tatematika!.getBalloonBounds(id)
+      const game = window.__tatematika!.getGame()
+      const canvas = document.querySelector('canvas')!
+      const rect = canvas.getBoundingClientRect()
+      const viewScale = rect.width / game.scale.width
+      return {
+        x: rect.left + (bounds.x + bounds.width / 2) * viewScale,
+        y: rect.top + (bounds.y + bounds.height / 2) * viewScale
+      }
     }, balloonB.id)
-
-    // Check final state
+    await page.mouse.click(pointB.x, pointB.y)
+    
+    const tapLatch = await page.evaluate(() => (window as any).__bTapLatch)
+    expect(tapLatch.seen, 'precondition: B pointer was observed in the page').toBe(true)
+    expect(
+      tapLatch.isJumping || tapLatch.phase === 'jump',
+      `precondition: tap on B must arrive during the jump (phase=${tapLatch.phase}, isJumping=${tapLatch.isJumping})`
+    ).toBe(true)
+    
+    await expectIdlePhase(page)
+    
     const finalState = await page.evaluate(() => window.__tatematika!.getGameState())
-    const balloonBErrorIncremented = finalState.wrongAttempts > initialWrongAttempts
+    const bounceCountB = await page.evaluate((id) => (window as any).__bounceLatchCounts?.[id] || 0, balloonB.id)
+    const oscCountAfterA = await page.evaluate(() => (window as any).__oscillatorStarts.length)
     
-    const oscCountAfterScenario = await page.evaluate(() => (window as any).__oscillatorStarts.length)
-    const totalSoundsInScenario = oscCountAfterScenario - oscCountBeforeScenario
-    
-    // Fully handled = error +1 AND B bounced AND total sounds == 2*N (baseline N + tap on B N)
-    // Fully ignored = no error AND no B bounce AND total sounds == N (only from first tap A)
-    
-    const fullyHandled = balloonBErrorIncremented && balloonBBounced && (totalSoundsInScenario === 2 * N)
-    const fullyIgnored = !balloonBErrorIncremented && !balloonBBounced && (totalSoundsInScenario === N)
-    
-    if (!fullyHandled && !fullyIgnored) {
-      // Partial handling - this is the failure we expect
-      const parts: string[] = []
-      if (balloonBErrorIncremented) parts.push('error counted')
-      if (balloonBBounced) parts.push('B bounced')
-      if (totalSoundsInScenario === 2 * N) parts.push(`sound played (total=${totalSoundsInScenario}, expected 2*${N})`)
-      
-      const missing: string[] = []
-      if (!balloonBErrorIncremented) missing.push('no error')
-      if (!balloonBBounced) missing.push('no B bounce')
-      if (totalSoundsInScenario !== 2 * N && totalSoundsInScenario !== N) {
-        missing.push(`sound count=${totalSoundsInScenario}, expected exactly ${N} (ignored) or ${2 * N} (handled)`)
-      } else if (totalSoundsInScenario === N) {
-        missing.push(`sound count=${N} (ignored level) but error/bounce detected`)
-      }
-      
-      expect(false, `wrong tap during jump is HALF-HANDLED: ${parts.join(', ')} but ${missing.join(', ')}`).toBe(true)
-    }
-    
-    // If we get here, behavior is consistent (but may not be tested on current code)
-    expect(fullyHandled || fullyIgnored, 'wrong tap during jump must be either fully handled OR fully ignored').toBe(true)
+    expect(finalState.wrongAttempts, 'only the accepted tap A counts as an error').toBe(preA + 1)
+    expect(bounceCountB, 'B must not bounce while A is in progress').toBe(0)
+    expect(oscCountAfterA - oscCountBeforeA, 'only A plays its sound; B is ignored').toBe(N)
   })
 
 })
