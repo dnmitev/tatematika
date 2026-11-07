@@ -109,7 +109,7 @@ test.describe('PR #2 Review Regressions', () => {
       return !jumpState.isJumping
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
-    // Install per-frame recorder
+    // Install per-frame recorder tracking jump progress
     await page.evaluate((targetId) => {
       const game = window.__tatematika!.getGame()
       const scene = game.scene.getScene('GameScene') as any
@@ -119,9 +119,18 @@ test.describe('PR #2 Review Regressions', () => {
         const jumpState = window.__tatematika!.getCatJumpState()
         const bs = scene.balloonSprites.find((b: any) => b.id === targetId)
         
+        // Calculate jump progress manually (same logic as src)
+        let progress = null
+        if (scene.catIsJumping && scene.catJumpTime !== undefined) {
+          const jumpDuration = 0.6
+          progress = scene.catJumpTime / jumpDuration
+          if (progress > 1) progress = 1
+        }
+        
         frames.push({
           time: scene.time.now,
           isJumping: jumpState.isJumping,
+          jumpProgress: progress,
           balloonExists: !!bs,
           spriteExists: bs ? !!bs.sprite : false,
           visible: bs?.sprite?.visible,
@@ -157,20 +166,58 @@ test.describe('PR #2 Review Regressions', () => {
       return window.__k3Frames
     })
     
+    // Contact threshold: src detects contact at progress >= 0.5 (arc peak)
+    const CONTACT_PROGRESS_THRESHOLD = 0.5
+    
     // Find jumping frames
     const jumpingFrames = frames.filter((f: any) => f.isJumping)
     
     // Assert: at least 5 jumping frames recorded (precondition check)
     expect(jumpingFrames.length, `only ${jumpingFrames.length} jumping frames recorded, jump too fast or recorder missed start`).toBeGreaterThanOrEqual(5)
     
-    // Assert: balloon present and visible on every jumping frame UNTIL it starts popping
-    // Once isPopping=true, visible can become false as part of the pop animation
-    const jumpingBeforePopFrames = jumpingFrames.filter((f: any) => !f.isPopping)
-    const missingFrames = jumpingBeforePopFrames.filter((f: any) => !f.balloonExists || !f.spriteExists || !f.visible)
+    // Find contact frame: first frame where jump progress >= 0.5
+    let contactFrameIndex = -1
+    for (let i = 0; i < frames.length; i++) {
+      const f = frames[i]
+      if (f.jumpProgress !== null && f.jumpProgress >= CONTACT_PROGRESS_THRESHOLD) {
+        contactFrameIndex = i
+        break
+      }
+    }
+    
+    expect(contactFrameIndex, 'contact frame not found - jump progress never reached 0.5').toBeGreaterThan(-1)
+    
+    const contactFrame = frames[contactFrameIndex]
+    const framesBeforeContact = frames.slice(0, contactFrameIndex)
+    
+    // Assert: at least 3 frames before contact (precondition)
+    expect(framesBeforeContact.length, 'jump too fast - less than 3 frames before contact').toBeGreaterThanOrEqual(3)
+    
+    // Assert: balloon exists and visible on every frame before contact
+    const missingBeforeContact = framesBeforeContact.filter((f: any) => !f.balloonExists || !f.spriteExists || !f.visible)
     expect(
-      missingFrames.length,
-      `balloon missing or invisible on ${missingFrames.length} jumping-before-pop frames: ${missingFrames.map((f: any) => `t=${f.time} exists=${f.balloonExists} sprite=${f.spriteExists} visible=${f.visible} isPopping=${f.isPopping}`).join(', ')}`
+      missingBeforeContact.length,
+      `balloon missing or invisible on ${missingBeforeContact.length} frames before contact: ${missingBeforeContact.map((f: any) => `t=${f.time} exists=${f.balloonExists} sprite=${f.spriteExists} visible=${f.visible} progress=${f.jumpProgress?.toFixed(2)}`).join(', ')}`
     ).toBe(0)
+    
+    // Find first frame where pop starts (isPopping=true or balloon gone)
+    let popStartFrameIndex = -1
+    for (let i = 0; i < frames.length; i++) {
+      const f = frames[i]
+      if (f.isPopping || (!f.balloonExists && i > 0 && frames[i - 1].balloonExists)) {
+        popStartFrameIndex = i
+        break
+      }
+    }
+    
+    // Assert: pop starts at or after contact
+    if (popStartFrameIndex !== -1) {
+      const popStartFrame = frames[popStartFrameIndex]
+      expect(
+        popStartFrameIndex >= contactFrameIndex,
+        `pop started at frame ${popStartFrameIndex} (t=${popStartFrame.time}, progress=${popStartFrame.jumpProgress?.toFixed(2)}) BEFORE cat reached balloon at frame ${contactFrameIndex} (t=${contactFrame.time}, progress=${contactFrame.jumpProgress.toFixed(2)})`
+      ).toBe(true)
+    }
   })
 
   test('K3: New balloons only appear after pop animation completes (~400ms)', async ({ page }) => {
