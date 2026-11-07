@@ -1,4 +1,4 @@
-import type { Formula, Operation } from './types'
+import type { Formula, Operation, RandomGenerator } from './types'
 
 /**
  * Generate a random formula based on the given constraints
@@ -61,7 +61,8 @@ export function generateRoundFormulas(
   target: number,
   count: number,
   upperLimit: number,
-  operation: Operation
+  operation: Operation,
+  rng?: RandomGenerator
 ): Formula[] {
   const formulas: Formula[] = []
   const usedResults = new Set<number>([target])

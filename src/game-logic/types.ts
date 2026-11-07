@@ -58,3 +58,11 @@ export interface GameState {
   level: number
   settings: GameSettings
 }
+
+/**
+ * Random number generator interface for dependency injection
+ */
+export interface RandomGenerator {
+  /** Returns a random number in [0, 1) */
+  random(): number
+}
