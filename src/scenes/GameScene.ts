@@ -419,6 +419,9 @@ export class GameScene extends Phaser.Scene {
       }
     }
     
+    // Find the correct balloon index to ensure clear vertical corridor
+    const correctBalloonIndex = this.gameState.round.balloons.findIndex(b => b.isCorrect)
+    
     let positions: Array<{ x: number; y: number }> = []
     
     if (count <= 3) {
@@ -433,16 +436,23 @@ export class GameScene extends Phaser.Scene {
           y
         }))
       } else {
-        const x = availableWidth / 2
-        const totalHeight = count * balloonHeight + (count - 1) * margin
-        if (totalHeight > availableHeight) {
-          balloonHeight = Math.max(minTarget, (availableHeight - (count - 1) * margin) / count)
+        // Single column layout - place all balloons in same row to avoid corridor conflicts
+        // Since all balloons are at same Y, none can be below another
+        
+        // Shrink balloons to fit all in one row if needed
+        const maxWidthForRow = (availableWidth - (count + 1) * margin) / count
+        if (balloonWidth > maxWidthForRow) {
+          balloonWidth = Math.max(minTarget, maxWidthForRow)
         }
-        const finalTotalHeight = count * balloonHeight + (count - 1) * margin
-        const topMargin = (availableHeight - finalTotalHeight) / 2
+        
+        // Single row positioning
+        const totalWidth = count * balloonWidth + (count - 1) * margin
+        const startX = (availableWidth - totalWidth) / 2 + balloonWidth / 2
+        const y = hudTopSpace + availableHeight / 2
+        
         positions = Array.from({ length: count }, (_, i) => ({
-          x,
-          y: hudTopSpace + topMargin + i * (balloonHeight + margin) + balloonHeight / 2
+          x: startX + i * (balloonWidth + margin),
+          y
         }))
       }
     } else if (count === 4) {
@@ -455,14 +465,51 @@ export class GameScene extends Phaser.Scene {
       const y1 = hudTopSpace + topMargin + balloonHeight / 2
       const y2 = y1 + balloonHeight + margin
       
-      positions = [
-        { x: col1, y: y1 },
-        { x: col2, y: y1 },
-        { x: col1, y: y2 },
-        { x: col2, y: y2 }
+      // Create pool of positions: top-left, top-right, bottom-left, bottom-right
+      const allPositions = [
+        { x: col1, y: y1, hasBelow: true },  // top-left, bottom-left is below
+        { x: col2, y: y1, hasBelow: true },  // top-right, bottom-right is below
+        { x: col1, y: y2, hasBelow: false }, // bottom-left, nothing below
+        { x: col2, y: y2, hasBelow: false }  // bottom-right, nothing below
       ]
-    } else {
       
+      // Assign positions ensuring correct balloon gets a bottom position (nothing below)
+      // Place correct balloon in bottom row (position 2 or 3)
+      if (correctBalloonIndex === 0) {
+        // Correct balloon is first: assign it to bottom-left
+        positions = [
+          allPositions[2], // index 0 (correct) -> bottom-left
+          allPositions[0], // index 1 -> top-left
+          allPositions[1], // index 2 -> top-right
+          allPositions[3]  // index 3 -> bottom-right
+        ]
+      } else if (correctBalloonIndex === 1) {
+        // Correct balloon is second: assign it to bottom-left
+        positions = [
+          allPositions[0], // index 0 -> top-left
+          allPositions[2], // index 1 (correct) -> bottom-left
+          allPositions[1], // index 2 -> top-right
+          allPositions[3]  // index 3 -> bottom-right
+        ]
+      } else if (correctBalloonIndex === 2) {
+        // Correct balloon is third: assign it to bottom-left
+        positions = [
+          allPositions[0], // index 0 -> top-left
+          allPositions[1], // index 1 -> top-right
+          allPositions[2], // index 2 (correct) -> bottom-left
+          allPositions[3]  // index 3 -> bottom-right
+        ]
+      } else {
+        // Correct balloon is fourth: assign it to bottom-right
+        positions = [
+          allPositions[0], // index 0 -> top-left
+          allPositions[1], // index 1 -> top-right
+          allPositions[2], // index 2 -> bottom-left
+          allPositions[3]  // index 3 (correct) -> bottom-right
+        ]
+      }
+    } else {
+      // Count 5: Use strategic positioning to ensure clear corridor
       const leftMargin = (availableWidth - (2 * balloonWidth + margin)) / 2
       const col1 = leftMargin + balloonWidth / 2
       const col2 = col1 + balloonWidth + margin
@@ -478,13 +525,41 @@ export class GameScene extends Phaser.Scene {
       const y2 = y1 + balloonHeight + margin
       const y3 = y2 + balloonHeight + margin
       
-      positions = [
-        { x: colCenter, y: y1 },
-        { x: col1, y: y2 },
-        { x: col2, y: y2 },
-        { x: col1, y: y3 },
-        { x: col2, y: y3 }
+      // Pool of positions with their "hasBelow" status
+      // Position 0 (center-top): positions 1,2,3,4 are all below but offset horizontally
+      // Position 1 (left-mid): position 3 (left-bottom) is directly below
+      // Position 2 (right-mid): position 4 (right-bottom) is directly below
+      // Position 3 (left-bottom): nothing below
+      // Position 4 (right-bottom): nothing below
+      
+      // Simplest strategy: place correct balloon in bottom row (position 3 or 4)
+      // Or in center-top position 0 which has natural corridor clearance
+      
+      const allPositions = [
+        { x: colCenter, y: y1 }, // 0: center-top (clear corridor - center column unique)
+        { x: col1, y: y2 },      // 1: left-mid (col1, has left-bottom below)
+        { x: col2, y: y2 },      // 2: right-mid (col2, has right-bottom below)
+        { x: col1, y: y3 },      // 3: left-bottom (col1, nothing below)
+        { x: col2, y: y3 }       // 4: right-bottom (col2, nothing below)
       ]
+      
+      // Assign correct balloon to a safe position (bottom row or center-top)
+      if (correctBalloonIndex === 0) {
+        // Assign correct to center-top (naturally clear)
+        positions = [allPositions[0], allPositions[1], allPositions[2], allPositions[3], allPositions[4]]
+      } else if (correctBalloonIndex === 1) {
+        // Assign correct to left-bottom (nothing below)
+        positions = [allPositions[1], allPositions[3], allPositions[0], allPositions[2], allPositions[4]]
+      } else if (correctBalloonIndex === 2) {
+        // Assign correct to right-bottom (nothing below)
+        positions = [allPositions[1], allPositions[2], allPositions[4], allPositions[0], allPositions[3]]
+      } else if (correctBalloonIndex === 3) {
+        // Already in left-bottom (nothing below)
+        positions = [allPositions[0], allPositions[1], allPositions[2], allPositions[3], allPositions[4]]
+      } else {
+        // Already in right-bottom (nothing below)
+        positions = [allPositions[0], allPositions[1], allPositions[2], allPositions[3], allPositions[4]]
+      }
     }
     
     this.gameState.round.balloons.forEach((balloon, index) => {
