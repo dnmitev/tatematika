@@ -15,7 +15,7 @@ import { test, expect } from '@playwright/test'
  * Purpose: catch discrepancies between what hooks report and what actually renders.
  */
 
-test.describe('Real Geometry - 320×568 (Small Mobile)', () => {
+test.describe('Real Geometry - 320×568 (Small Mobile) @mobile', () => {
   test.use({ viewport: { width: 320, height: 568 } })
   
   test.beforeEach(async ({ page }) => {
@@ -227,7 +227,7 @@ test.describe('Real Geometry - 320×568 (Small Mobile)', () => {
   })
 })
 
-test.describe('Real Geometry - 375×667 (iPhone 6/7/8)', () => {
+test.describe('Real Geometry - 375×667 (iPhone 6/7/8) @mobile', () => {
   test.use({ viewport: { width: 375, height: 667 } })
   
   test.beforeEach(async ({ page }) => {
@@ -412,7 +412,7 @@ test.describe('Real Geometry - 1280×800 (Desktop)', () => {
   })
 })
 
-test.describe('Real Geometry - Settings Button', () => {
+test.describe('Real Geometry - Settings Button @mobile', () => {
   test.use({ viewport: { width: 375, height: 667 } })
   
   test.beforeEach(async ({ page }) => {

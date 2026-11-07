@@ -13,7 +13,7 @@ import { popCorrectBalloonAndWait, getGameScaleAndRect } from './helpers'
  * - §5: With 5 balloons (max), all must be visible without cropping
  */
 
-test.describe('Responsive CSS Sizes - Mobile 375×667', () => {
+test.describe('Responsive CSS Sizes - Mobile 375×667 @mobile', () => {
   test.use({ viewport: { width: 375, height: 667 } })
 
   test.beforeEach(async ({ page }) => {
@@ -278,7 +278,7 @@ test.describe('Responsive CSS Sizes - Desktop 1920×1080', () => {
 })
 
 test.describe('Responsive CSS Sizes - Scale Factor Edge Cases', () => {
-  test('Elements remain above minimums even with aggressive FIT scaling at 320×568', async ({ page }) => {
+  test('Elements remain above minimums even with aggressive FIT scaling at 320×568 @mobile', async ({ page }) => {
     // iPhone SE size - most aggressive scaling
     await page.setViewportSize({ width: 320, height: 568 })
     
