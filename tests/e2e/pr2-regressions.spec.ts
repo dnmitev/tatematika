@@ -854,6 +854,10 @@ test.describe('PR #2 Review Regressions', () => {
     // Verify no NEW sounds start while muted (real click)
     const countBefore = await page.evaluate(() => 
       (window as any).__audioInstrumentation?.oscillators.length || 0)
+    
+    // Get current wrong attempts count
+    const wrongAttemptsBefore = await page.evaluate(() => window.__tatematika!.getGameState().wrongAttempts)
+    
     const wrongBalloon2 = state.balloons.find((b: any) => !b.isCorrect && b.id !== wrongBalloon.id)!
     const balloonBounds2 = await page.evaluate((id) => 
       window.__tatematika!.getBalloonBounds(id), wrongBalloon2.id)
@@ -862,7 +866,15 @@ test.describe('PR #2 Review Regressions', () => {
     const clickY2 = canvasRect.top + (balloonBounds2.y + balloonBounds2.height / 2) * scale
     
     await page.mouse.click(clickX2, clickY2)
-    await page.waitForTimeout(200)
+    
+    // Poll until cat arrives and error is counted (wrongAttempts increments)
+    await expect.poll(async () => {
+      const currentAttempts = await page.evaluate(() => window.__tatematika!.getGameState().wrongAttempts)
+      return currentAttempts > wrongAttemptsBefore
+    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    
+    // Wait additional 100ms to ensure sounds would have played
+    await page.waitForTimeout(100)
     
     const countAfter = await page.evaluate(() => 
       (window as any).__audioInstrumentation?.oscillators.length || 0)
@@ -935,17 +947,24 @@ test.describe('PR #2 Review Regressions', () => {
     const baselineClickX = canvasRect.left + (baselineBounds.x + baselineBounds.width / 2) * scale
     const baselineClickY = canvasRect.top + (baselineBounds.y + baselineBounds.height / 2) * scale
     
+    const baselineWrongAttemptsBefore = await page.evaluate(() => window.__tatematika!.getGameState().wrongAttempts)
     const baselineOscCountBefore = await page.evaluate(() => (window as any).__oscillatorStarts.length)
     await page.mouse.click(baselineClickX, baselineClickY)
     
-    // Wait for bounce animation
-    await page.waitForTimeout(100)
+    // Poll until cat arrives and error is counted
+    await expect.poll(async () => {
+      const currentAttempts = await page.evaluate(() => window.__tatematika!.getGameState().wrongAttempts)
+      return currentAttempts > baselineWrongAttemptsBefore
+    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    
+    // Check bounce right after cat arrives
     const baselineBounced = await page.evaluate((id) => {
       const anim = window.__tatematika!.getBalloonAnimationState(id)
       return anim.isBouncing
     }, baselineBalloon.id)
     
-    await page.waitForTimeout(500)
+    // Wait 100ms to ensure all sounds have started
+    await page.waitForTimeout(100)
     const baselineOscCountAfter = await page.evaluate(() => (window as any).__oscillatorStarts.length)
     const N = baselineOscCountAfter - baselineOscCountBefore
     
@@ -1025,7 +1044,27 @@ test.describe('PR #2 Review Regressions', () => {
       return !jumpState.isJumping
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
-    await page.waitForTimeout(200)
+    // Poll until wrongAttempts stabilizes (no changes for 100ms), indicating all jumps/sounds are done
+    let lastWrongAttempts = await page.evaluate(() => window.__tatematika!.getGameState().wrongAttempts)
+    let stableCount = 0
+    const maxWaitMs = 2000
+    const checkIntervalMs = 50
+    let totalWaitMs = 0
+    
+    while (stableCount < 2 && totalWaitMs < maxWaitMs) {
+      await page.waitForTimeout(checkIntervalMs)
+      totalWaitMs += checkIntervalMs
+      const currentWrongAttempts = await page.evaluate(() => window.__tatematika!.getGameState().wrongAttempts)
+      if (currentWrongAttempts === lastWrongAttempts) {
+        stableCount++
+      } else {
+        stableCount = 0
+        lastWrongAttempts = currentWrongAttempts
+      }
+    }
+    
+    // Wait additional 100ms to ensure all sounds have started
+    await page.waitForTimeout(100)
     
     // Check final state
     const finalState = await page.evaluate(() => window.__tatematika!.getGameState())
