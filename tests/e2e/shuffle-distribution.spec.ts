@@ -306,6 +306,10 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       await page.goto('/')
       await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
       
+      // K17 CONTRACT CHECK: setRoundRng hook must be implemented
+      const hasSetRoundRng = await page.evaluate(() => typeof window.__tatematika!.setRoundRng === 'function')
+      expect(hasSetRoundRng, 'K17 CONTRACT: setRoundRng hook must be implemented for deterministic shuffle').toBe(true)
+      
       await setBalloonCount(page, count)
       const result1 = await playRoundsAndRecordSlots(page, count, rounds, SEED_A)
       
@@ -354,6 +358,10 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       await page.goto('/')
       await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
       
+      // K17 CONTRACT CHECK: setRoundRng hook must be implemented
+      const hasSetRoundRng = await page.evaluate(() => typeof window.__tatematika!.setRoundRng === 'function')
+      expect(hasSetRoundRng, 'K17 CONTRACT: setRoundRng hook must be implemented for deterministic shuffle').toBe(true)
+      
       await setBalloonCount(page, count)
       const result = await playRoundsAndRecordSlots(page, count, rounds, SEED_B)
       
@@ -385,6 +393,10 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       await page.addInitScript(getMulberry32Code(SEED_A))
       await page.goto('/')
       await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+      
+      // K17 CONTRACT CHECK: setRoundRng hook must be implemented for shuffle to work
+      const hasSetRoundRng = await page.evaluate(() => typeof window.__tatematika!.setRoundRng === 'function')
+      expect(hasSetRoundRng, 'K17 CONTRACT: setRoundRng hook must be implemented (shuffle not working without it)').toBe(true)
       
       await setBalloonCount(page, count)
       const result = await playRoundsAndRecordSlots(page, count, rounds)
@@ -433,6 +445,10 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       await page.addInitScript(getMulberry32Code(SEED_B))
       await page.goto('/')
       await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+      
+      // K17 CONTRACT CHECK: setRoundRng hook must be implemented for shuffle to work
+      const hasSetRoundRng = await page.evaluate(() => typeof window.__tatematika!.setRoundRng === 'function')
+      expect(hasSetRoundRng, 'K17 CONTRACT: setRoundRng hook must be implemented (shuffle not working without it)').toBe(true)
       
       await setBalloonCount(page, count)
       const result = await playRoundsAndRecordSlots(page, count, rounds)

@@ -76,11 +76,20 @@ test.describe('K16: Input During Action - Mobile @mobile', () => {
     }
     
     // Wait for action to complete
-    await expect.poll(async () => {
+    try {
+      await expect.poll(async () => {
+        const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+        const newState = await page.evaluate(() => window.__tatematika!.getGameState())
+        return !jumpState.isJumping && newState.stars > initialStars
+      }, { timeout: 5000, intervals: [50] }).toBe(true)
+    } catch (e) {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-      const newState = await page.evaluate(() => window.__tatematika!.getGameState())
-      return !jumpState.isJumping && newState.stars > initialStars
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+      const finalState = await page.evaluate(() => window.__tatematika!.getGameState())
+      throw new Error(
+        `K16 Touch test: Action did not complete within 5s. ` +
+        `isJumping=${jumpState.isJumping}, stars=${finalState.stars} (initial=${initialStars})`
+      )
+    }
     
     // Assert exactly one evaluation
     const finalState = await page.evaluate(() => window.__tatematika!.getGameState())
@@ -116,11 +125,20 @@ test.describe('K16: Input During Action - Mobile @mobile', () => {
     }
     
     // Wait for action to complete
-    await expect.poll(async () => {
+    try {
+      await expect.poll(async () => {
+        const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+        const newState = await page.evaluate(() => window.__tatematika!.getGameState())
+        return !jumpState.isJumping && newState.stars > initialStars
+      }, { timeout: 5000, intervals: [50] }).toBe(true)
+    } catch (e) {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-      const newState = await page.evaluate(() => window.__tatematika!.getGameState())
-      return !jumpState.isJumping && newState.stars > initialStars
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+      const finalState = await page.evaluate(() => window.__tatematika!.getGameState())
+      throw new Error(
+        `K16 Mouse test: Action did not complete within 5s. ` +
+        `isJumping=${jumpState.isJumping}, stars=${finalState.stars} (initial=${initialStars})`
+      )
+    }
     
     // Assert exactly one evaluation
     const finalState = await page.evaluate(() => window.__tatematika!.getGameState())
@@ -154,11 +172,20 @@ test.describe('K16: Input During Action - Mobile @mobile', () => {
     }
     
     // Wait for action to complete
-    await expect.poll(async () => {
+    try {
+      await expect.poll(async () => {
+        const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+        const newState = await page.evaluate(() => window.__tatematika!.getGameState())
+        return !jumpState.isJumping && newState.stars > initialStars
+      }, { timeout: 5000, intervals: [50] }).toBe(true)
+    } catch (e) {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-      const newState = await page.evaluate(() => window.__tatematika!.getGameState())
-      return !jumpState.isJumping && newState.stars > initialStars
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+      const finalState = await page.evaluate(() => window.__tatematika!.getGameState())
+      throw new Error(
+        `K16 Keyboard test: Action did not complete within 5s. ` +
+        `isJumping=${jumpState.isJumping}, stars=${finalState.stars} (initial=${initialStars})`
+      )
+    }
     
     // Assert exactly one evaluation
     const finalState = await page.evaluate(() => window.__tatematika!.getGameState())
@@ -194,11 +221,20 @@ test.describe('K16: Input During Action - Mobile @mobile', () => {
     }
     
     // Wait for action to complete
-    await expect.poll(async () => {
+    try {
+      await expect.poll(async () => {
+        const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
+        const newState = await page.evaluate(() => window.__tatematika!.getGameState())
+        return !jumpState.isJumping && newState.wrongAttempts > initialWrongAttempts
+      }, { timeout: 5000, intervals: [50] }).toBe(true)
+    } catch (e) {
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-      const newState = await page.evaluate(() => window.__tatematika!.getGameState())
-      return !jumpState.isJumping && newState.wrongAttempts > initialWrongAttempts
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+      const finalState = await page.evaluate(() => window.__tatematika!.getGameState())
+      throw new Error(
+        `K16 Mixed test: Action did not complete within 5s. ` +
+        `isJumping=${jumpState.isJumping}, wrongAttempts=${finalState.wrongAttempts} (initial=${initialWrongAttempts})`
+      )
+    }
     
     // Assert exactly one error evaluation
     const finalState = await page.evaluate(() => window.__tatematika!.getGameState())
