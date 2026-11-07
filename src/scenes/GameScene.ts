@@ -1012,6 +1012,9 @@ export class GameScene extends Phaser.Scene {
     
     const nearestBalloon = this.findNearestBalloon()
     if (nearestBalloon) {
+      // Same action lock as a click: the pop/bounce completion only finishes locked actions
+      this.actionLocked = true
+      this.actionTargetBalloonId = nearestBalloon.id
       this.clearFeedbackIcon()
       this.catTargetX = nearestBalloon.x
       this.pendingJumpBalloonId = nearestBalloon.id
