@@ -7,10 +7,10 @@ import { test, expect } from '@playwright/test'
  * and that hit ellipses accurately match painted balloon bodies.
  * 
  * Current balloons are too stretched (radiusX ~145, radiusY ~48 at 1280×800).
- * Target proportions are pending from tate-designer.
  */
 
-// Aspect ratio bounds (width/height) - spec numbers pending from designer
+// Aspect ratio bounds (width/height) - working target range, not final spec
+// Final spec numbers are pending from tate-designer
 const BALLOON_ASPECT_MIN = 0.75
 const BALLOON_ASPECT_MAX = 1.05
 

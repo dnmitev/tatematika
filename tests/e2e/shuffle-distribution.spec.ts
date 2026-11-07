@@ -6,17 +6,42 @@ import { test, expect } from '@playwright/test'
  * Verifies that the correct balloon's position is randomly distributed
  * across left-to-right slots in actual gameplay, not always leftmost.
  * 
- * Under a fair shuffle, the probability that all 30 rounds place the correct
- * balloon in the same slot is (1/count)^29. For count=3, that's (1/3)^29 ≈ 5.6e-15.
- * The probability that all 30 are in slot 0 specifically is also (1/3)^29.
- * Across 3 test cases, the chance of a false failure is ≤ 3·(1/3)^29 ≈ 1.7e-14.
+ * Uses deterministic seeded PRNG (mulberry32) injected via page.addInitScript
+ * to replace Math.random before game loads, ensuring reproducible results.
  */
+
+// Seeded PRNG seeds for deterministic testing
+const SEED_A = 0x12345678
+const SEED_B = 0x9ABCDEF0
+
+/**
+ * Mulberry32 PRNG - simple, fast, and sufficient for testing
+ * https://github.com/bryc/code/blob/master/jshash/PRNGs.md
+ */
+function getMulberry32Code(seed: number): string {
+  return `
+    (function() {
+      let state = ${seed};
+      Math.random = function() {
+        state |= 0;
+        state = state + 0x6D2B79F5 | 0;
+        let t = Math.imul(state ^ state >>> 15, 1 | state);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    })();
+  `
+}
 
 async function setBalloonCount(page: any, count: number) {
   await page.evaluate(() => window.__tatematika!.openSettings())
   
   const balloonCountInput = page.locator('[data-testid="setting-balloon-count"]').first()
   await balloonCountInput.fill(String(count))
+  
+  // Set correctBalloonsPerLevel high to allow 30 rounds without level complete
+  const correctPerLevelInput = page.locator('[data-testid="setting-correct-per-level"]').first()
+  await correctPerLevelInput.fill('100')
   
   await page.evaluate(() => window.__tatematika!.closeSettings())
   await page.waitForTimeout(200)
@@ -42,7 +67,7 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
     
     const state = await page.evaluate(() => window.__tatematika!.getGameState())
     const correctBalloon = state.balloons.find((b: any) => b.isCorrect)!
-    const initialBalloonIds = state.balloons.map((b: any) => b.id).sort()
+    const initialStars = state.stars
     
     // Get all balloon centerX positions sorted to find slot
     const balloonPositions = await page.evaluate(() => {
@@ -79,33 +104,15 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
       return jumpState.isJumping
     }, { timeout: 5000, intervals: [50] }).toBe(true)
     
-    // Wait for new round (balloon ID set change)
-    // Handle level-complete by clicking through if needed
+    // Wait for new round (star count increases and cat not jumping)
     await expect.poll(async () => {
-      // Check for level complete screen first
-      const levelCompleteVisible = await page.evaluate(() => {
-        const game = window.__tatematika!.getGame()
-        const levelScene = game.scene.getScene('LevelCompleteScene')
-        return levelScene && (levelScene as any).scene.isActive()
-      }).catch(() => false)
-      
-      if (levelCompleteVisible) {
-        // Click next level button if available
-        await page.evaluate(() => {
-          const game = window.__tatematika!.getGame()
-          const levelScene = game.scene.getScene('LevelCompleteScene') as any
-          if (levelScene && levelScene.nextButton) {
-            levelScene.nextButton.emit('pointerdown')
-          }
-        }).catch(() => {})
-        return false
-      }
-      
       const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
       const newState = await page.evaluate(() => window.__tatematika!.getGameState())
-      const newBalloonIds = newState.balloons.map((b: any) => b.id).sort()
-      return !jumpState.isJumping && JSON.stringify(newBalloonIds) !== JSON.stringify(initialBalloonIds)
+      return !jumpState.isJumping && newState.stars > initialStars
     }, { timeout: 10000, intervals: [100] }).toBe(true)
+    
+    // Small delay to ensure Date.now() changes for next balloon ID generation
+    await page.waitForTimeout(10)
   }
   
   return slots
@@ -114,62 +121,59 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
 test.describe('Shuffle Distribution - 1280×800', () => {
   test.use({ viewport: { width: 1280, height: 800 } })
   
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/')
-    await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
-  })
-  
-  test('Count 3: correct balloon not always in same slot (30 rounds)', async ({ page }) => {
-    const count = 3
-    const rounds = 30
+  for (const count of [3, 4, 5]) {
+    test(`Count ${count} Seed A: deterministic shuffle distribution (30 rounds)`, async ({ page }) => {
+      const rounds = 30
+      
+      // Inject seeded PRNG before game loads
+      await page.addInitScript(getMulberry32Code(SEED_A))
+      await page.goto('/')
+      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+      
+      await setBalloonCount(page, count)
+      const slots = await playRoundsAndRecordSlots(page, count, rounds)
+      
+      expect(slots.length, 'Should have recorded all rounds').toBe(rounds)
+      
+      // Deterministic assertions for this specific seed
+      const uniqueSlots = new Set(slots)
+      expect(uniqueSlots.size, 'Correct balloon should appear in at least 2 distinct slots').toBeGreaterThanOrEqual(2)
+      
+      // Should not be slot 0 in every round
+      const allSlot0 = slots.every(s => s === 0)
+      expect(allSlot0, 'Correct balloon should not always be in slot 0').toBe(false)
+      
+      // Verify determinism: same seed should give same sequence
+      await page.addInitScript(getMulberry32Code(SEED_A))
+      await page.goto('/')
+      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+      
+      await setBalloonCount(page, count)
+      const slots2 = await playRoundsAndRecordSlots(page, count, rounds)
+      
+      expect(slots2, 'Same seed should produce identical slot sequence').toEqual(slots)
+    })
     
-    await setBalloonCount(page, count)
-    const slots = await playRoundsAndRecordSlots(page, count, rounds)
-    
-    expect(slots.length, 'Should have recorded all rounds').toBe(rounds)
-    
-    // Correct balloon should not be in the same slot for all rounds
-    const uniqueSlots = new Set(slots)
-    expect(uniqueSlots.size, 'Correct balloon should appear in different slots').toBeGreaterThan(1)
-    
-    // Correct balloon should not always be in slot 0 (leftmost)
-    const allSlot0 = slots.every(s => s === 0)
-    expect(allSlot0, 'Correct balloon should not always be in slot 0').toBe(false)
-  })
-  
-  test('Count 4: correct balloon not always in same slot (30 rounds)', async ({ page }) => {
-    const count = 4
-    const rounds = 30
-    
-    await setBalloonCount(page, count)
-    const slots = await playRoundsAndRecordSlots(page, count, rounds)
-    
-    expect(slots.length, 'Should have recorded all rounds').toBe(rounds)
-    
-    // Correct balloon should not be in the same slot for all rounds
-    const uniqueSlots = new Set(slots)
-    expect(uniqueSlots.size, 'Correct balloon should appear in different slots').toBeGreaterThan(1)
-    
-    // Correct balloon should not always be in slot 0 (leftmost)
-    const allSlot0 = slots.every(s => s === 0)
-    expect(allSlot0, 'Correct balloon should not always be in slot 0').toBe(false)
-  })
-  
-  test('Count 5: correct balloon not always in same slot (30 rounds)', async ({ page }) => {
-    const count = 5
-    const rounds = 30
-    
-    await setBalloonCount(page, count)
-    const slots = await playRoundsAndRecordSlots(page, count, rounds)
-    
-    expect(slots.length, 'Should have recorded all rounds').toBe(rounds)
-    
-    // Correct balloon should not be in the same slot for all rounds
-    const uniqueSlots = new Set(slots)
-    expect(uniqueSlots.size, 'Correct balloon should appear in different slots').toBeGreaterThan(1)
-    
-    // Correct balloon should not always be in slot 0 (leftmost)
-    const allSlot0 = slots.every(s => s === 0)
-    expect(allSlot0, 'Correct balloon should not always be in slot 0').toBe(false)
-  })
+    test(`Count ${count} Seed B: deterministic shuffle distribution (30 rounds)`, async ({ page }) => {
+      const rounds = 30
+      
+      // Inject different seeded PRNG
+      await page.addInitScript(getMulberry32Code(SEED_B))
+      await page.goto('/')
+      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+      
+      await setBalloonCount(page, count)
+      const slots = await playRoundsAndRecordSlots(page, count, rounds)
+      
+      expect(slots.length, 'Should have recorded all rounds').toBe(rounds)
+      
+      // Deterministic assertions for this specific seed
+      const uniqueSlots = new Set(slots)
+      expect(uniqueSlots.size, 'Correct balloon should appear in at least 2 distinct slots').toBeGreaterThanOrEqual(2)
+      
+      // Should not be slot 0 in every round
+      const allSlot0 = slots.every(s => s === 0)
+      expect(allSlot0, 'Correct balloon should not always be in slot 0').toBe(false)
+    })
+  }
 })
