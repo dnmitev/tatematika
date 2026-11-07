@@ -469,12 +469,20 @@ export class GameScene extends Phaser.Scene {
       // Count 4: 2×2 grid for both desktop and mobile
       // Array positions [0,1,2,3] map to cells (0,0), (0,1), (1,0), (1,1)
       
+      // Ensure minimum top margin for safe zones
+      const minTopMargin = 20
+      const maxHeightWithMinMargin = availableHeight - 2 * minTopMargin
+      const maxBalloonHeight = (maxHeightWithMinMargin - margin) / 2
+      if (balloonHeight > maxBalloonHeight) {
+        balloonHeight = Math.max(minTarget, maxBalloonHeight)
+      }
+      
       const leftMargin = (availableWidth - (2 * balloonWidth + margin)) / 2
       const col1 = leftMargin + balloonWidth / 2
       const col2 = col1 + balloonWidth + margin
       
       const finalTotalHeight = 2 * balloonHeight + margin
-      const topMargin = (availableHeight - finalTotalHeight) / 2
+      const topMargin = Math.max(minTopMargin, (availableHeight - finalTotalHeight) / 2)
       const y1 = hudTopSpace + topMargin + balloonHeight / 2
       const y2 = y1 + balloonHeight + margin
       
@@ -488,10 +496,13 @@ export class GameScene extends Phaser.Scene {
       // Count 5: 4+1 layout (4 on top row, 1 on bottom row)
       // Array positions [0,1,2,3,4] map to cells (0,0), (0,1), (0,2), (0,3), (1,0)
       
+      // Ensure minimum top margin for safe zones
+      const minTopMargin = 20
+      const maxHeightWithMinMargin = availableHeight - 2 * minTopMargin
       const rows = 2
-      const totalHeight = rows * balloonHeight + margin
-      if (totalHeight > availableHeight) {
-        balloonHeight = Math.max(minTarget, (availableHeight - margin) / rows)
+      const maxBalloonHeight = (maxHeightWithMinMargin - margin) / rows
+      if (balloonHeight > maxBalloonHeight) {
+        balloonHeight = Math.max(minTarget, maxBalloonHeight)
       }
       
       const maxWidthForTopRow = (availableWidth - 5 * margin) / 4
@@ -500,7 +511,7 @@ export class GameScene extends Phaser.Scene {
       }
       
       const finalTotalHeight = rows * balloonHeight + margin
-      const topMargin = (availableHeight - finalTotalHeight) / 2
+      const topMargin = Math.max(minTopMargin, (availableHeight - finalTotalHeight) / 2)
       const y1 = hudTopSpace + topMargin + balloonHeight / 2
       const y2 = y1 + balloonHeight + margin
       
