@@ -308,131 +308,361 @@ test.describe('PR #2 Review Regressions', () => {
   // REGRESSION: Mute must stop sounds that are ALREADY playing
   // ============================================================================
 
+  // Shared instrumentation and analysis code (injected into page context)
+  const audioInstrumentationCode = `
+    function setupAudioInstrumentation() {
+      const oscillators = [];
+      const liveContexts = new Map();
+      let muteSnapshot = null;
+      
+      // Install capture-phase listener to snapshot mute moment BEFORE Phaser handles click
+      window.addEventListener('pointerdown', (e) => {
+        muteSnapshot = {
+          perfNow: performance.now(),
+          contexts: new Map()
+        };
+        for (const [ctx] of liveContexts) {
+          muteSnapshot.contexts.set(ctx, ctx.currentTime);
+        }
+      }, true);
+      
+      const BaseProto = window.BaseAudioContext?.prototype || window.AudioContext?.prototype;
+      
+      if (BaseProto) {
+        const originalClose = BaseProto.close;
+        if (originalClose) {
+          BaseProto.close = function() {
+            for (const osc of oscillators) {
+              if (osc.ctx === this && osc.ctxClosedAt === 0) {
+                osc.ctxClosedAt = this.currentTime;
+                osc.ctxClosePerfTime = performance.now();
+              }
+            }
+            return originalClose.apply(this, arguments);
+          };
+        }
+        
+        const originalSuspend = BaseProto.suspend;
+        if (originalSuspend) {
+          BaseProto.suspend = function() {
+            for (const osc of oscillators) {
+              if (osc.ctx === this && osc.ctxSuspendedAt === 0) {
+                osc.ctxSuspendedAt = this.currentTime;
+                osc.ctxSuspendPerfTime = performance.now();
+              }
+            }
+            return originalSuspend.apply(this, arguments);
+          };
+        }
+        
+        const originalCreateOscillator = BaseProto.createOscillator;
+        if (originalCreateOscillator) {
+          BaseProto.createOscillator = function() {
+            const osc = originalCreateOscillator.call(this);
+            const ctx = this;
+            liveContexts.set(ctx, true);
+            
+            const state = {
+              ctx,
+              startWhen: -1,
+              originalStopWhen: -1,
+              stopWhen: -1,
+              startCallTime: 0,
+              stopCallTime: 0,
+              stopCallPerfTime: 0,
+              stopCallCtxTime: 0,
+              disconnectCallTime: 0,
+              disconnectCallPerfTime: 0,
+              disconnectCallCtxTime: 0,
+              gainCalls: [],
+              ctxClosedAt: 0,
+              ctxClosePerfTime: 0,
+              ctxSuspendedAt: 0,
+              ctxSuspendPerfTime: 0
+            };
+            oscillators.push(state);
+            
+            const originalStart = osc.start;
+            const originalStop = osc.stop;
+            const originalConnect = osc.connect;
+            const originalDisconnect = osc.disconnect;
+            
+            osc.start = function(when) {
+              state.startWhen = when !== undefined ? when : ctx.currentTime;
+              state.startCallTime = ctx.currentTime;
+              return originalStart.apply(this, arguments);
+            };
+            
+            osc.stop = function(when) {
+              const stopWhen = when !== undefined ? when : ctx.currentTime;
+              if (state.originalStopWhen === -1) {
+                state.originalStopWhen = stopWhen;
+              }
+              state.stopWhen = stopWhen;
+              state.stopCallTime = ctx.currentTime;
+              state.stopCallPerfTime = performance.now();
+              state.stopCallCtxTime = ctx.currentTime;
+              return originalStop.apply(this, arguments);
+            };
+            
+            osc.connect = function(destination) {
+              if (destination && destination.gain !== undefined) {
+                const gainParam = destination.gain;
+                const originalSetValue = gainParam.setValueAtTime;
+                if (originalSetValue && !gainParam.__patched) {
+                  gainParam.__patched = true;
+                  gainParam.setValueAtTime = function(value, time) {
+                    state.gainCalls.push({
+                      value,
+                      time,
+                      callPerfTime: performance.now(),
+                      callCtxTime: ctx.currentTime
+                    });
+                    return originalSetValue.call(this, value, time);
+                  };
+                }
+              }
+              return originalConnect.apply(this, arguments);
+            };
+            
+            osc.disconnect = function() {
+              state.disconnectCallTime = ctx.currentTime;
+              state.disconnectCallPerfTime = performance.now();
+              state.disconnectCallCtxTime = ctx.currentTime;
+              return originalDisconnect.apply(this, arguments);
+            };
+            
+            return osc;
+          };
+        }
+      }
+      
+      return { oscillators, liveContexts, getMuteSnapshot: () => muteSnapshot };
+    }
+    
+    function analyzeMuteEffectiveness(oscillators, muteSnapshot) {
+      const audibleAtMute = [];
+      
+      for (const osc of oscillators) {
+        const ctxTimeAtMute = muteSnapshot.contexts.get(osc.ctx) || 0;
+        
+        // Was this oscillator audible at mute?
+        if (osc.startWhen >= 0 && osc.startWhen <= ctxTimeAtMute && 
+            osc.originalStopWhen > ctxTimeAtMute + 0.05) {
+          
+          let effectiveEnd = Infinity;
+          let silencedBy = 'none';
+          
+          // Check re-stop (stopWhen differs from originalStopWhen means stop was called again)
+          if (osc.stopWhen !== osc.originalStopWhen) {
+            const issuedAfterMute = osc.stopCallPerfTime >= muteSnapshot.perfNow ||
+                                     osc.stopCallCtxTime >= ctxTimeAtMute;
+            if (issuedAfterMute && osc.stopWhen < effectiveEnd) {
+              effectiveEnd = osc.stopWhen;
+              silencedBy = 'stop';
+            }
+          }
+          
+          // Check disconnect
+          if (osc.disconnectCallTime > 0) {
+            const issuedAfterMute = osc.disconnectCallPerfTime >= muteSnapshot.perfNow ||
+                                     osc.disconnectCallCtxTime >= ctxTimeAtMute;
+            if (issuedAfterMute && osc.disconnectCallCtxTime < effectiveEnd) {
+              effectiveEnd = osc.disconnectCallCtxTime;
+              silencedBy = 'disconnect';
+            }
+          }
+          
+          // Check gain to zero
+          for (const gain of osc.gainCalls) {
+            if (gain.value === 0 || gain.value < 0.001) {
+              const issuedAfterMute = gain.callPerfTime >= muteSnapshot.perfNow ||
+                                       gain.callCtxTime >= ctxTimeAtMute;
+              if (issuedAfterMute && gain.time < effectiveEnd) {
+                effectiveEnd = gain.time;
+                silencedBy = 'gain';
+              }
+            }
+          }
+          
+          // Check context close/suspend
+          if (osc.ctxClosedAt > 0) {
+            const issuedAfterMute = osc.ctxClosePerfTime >= muteSnapshot.perfNow ||
+                                     osc.ctxClosedAt >= ctxTimeAtMute;
+            if (issuedAfterMute && osc.ctxClosedAt < effectiveEnd) {
+              effectiveEnd = osc.ctxClosedAt;
+              silencedBy = 'close';
+            }
+          }
+          
+          if (osc.ctxSuspendedAt > 0) {
+            const issuedAfterMute = osc.ctxSuspendPerfTime >= muteSnapshot.perfNow ||
+                                     osc.ctxSuspendedAt >= ctxTimeAtMute;
+            if (issuedAfterMute && osc.ctxSuspendedAt < effectiveEnd) {
+              effectiveEnd = osc.ctxSuspendedAt;
+              silencedBy = 'suspend';
+            }
+          }
+          
+          audibleAtMute.push({
+            originalStopWhen: osc.originalStopWhen,
+            ctxTimeAtMute,
+            effectiveEnd,
+            silencedBy,
+            silencedInTime: effectiveEnd <= ctxTimeAtMute + 0.05
+          });
+        }
+      }
+      
+      return audibleAtMute;
+    }
+  `;
+
+  test('K10 instrumentation self-test: verify silencing detection', async ({ page }) => {
+    // Self-test to prove the instrumentation can detect silencing
+    // Uses same init script and analysis function as main K10 test
+    
+    await page.addInitScript(audioInstrumentationCode + `
+      window.__audioInstrumentation = setupAudioInstrumentation();
+      window.__analyzeMuteEffectiveness = analyzeMuteEffectiveness;
+    `)
+    
+    await page.goto('about:blank')
+    await page.waitForTimeout(10)
+    
+    // Test case 1: stop() silences
+    const result1 = await page.evaluate(() => {
+      const ctx = new AudioContext()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start(ctx.currentTime)
+      osc.stop(ctx.currentTime + 1)
+      
+      const muteSnapshot = {
+        perfNow: performance.now(),
+        contexts: new Map([[ctx, ctx.currentTime]])
+      }
+      
+      osc.stop(ctx.currentTime)
+      
+      const oscs = (window as any).__audioInstrumentation.oscillators
+      const analysis = (window as any).__analyzeMuteEffectiveness(oscs, muteSnapshot)
+      
+      return { length: analysis.length, silencedInTime: analysis[0]?.silencedInTime }
+    })
+    
+    expect(result1.length, 'self-test 1: one oscillator should be audible').toBe(1)
+    expect(result1.silencedInTime, 'self-test 1: stop() should silence').toBe(true)
+    
+    // Test case 2: close() silences
+    const result2 = await page.evaluate(() => {
+      ;(window as any).__audioInstrumentation.oscillators.length = 0
+      const ctx = new AudioContext()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start(ctx.currentTime)
+      osc.stop(ctx.currentTime + 1)
+      
+      const muteSnapshot = {
+        perfNow: performance.now(),
+        contexts: new Map([[ctx, ctx.currentTime]])
+      }
+      
+      ctx.close()
+      
+      const oscs = (window as any).__audioInstrumentation.oscillators
+      const analysis = (window as any).__analyzeMuteEffectiveness(oscs, muteSnapshot)
+      
+      return {
+        length: analysis.length,
+        silencedInTime: analysis[0]?.silencedInTime,
+        debug: {
+          ctxClosedAt: oscs[0]?.ctxClosedAt,
+          ctxClosePerfTime: oscs[0]?.ctxClosePerfTime,
+          ctxTimeAtMute: muteSnapshot.contexts.get(ctx),
+          muteSnapPerfNow: muteSnapshot.perfNow,
+          effectiveEnd: analysis[0]?.effectiveEnd,
+          silencedBy: analysis[0]?.silencedBy
+        }
+      }
+    })
+    
+    if (!result2.silencedInTime) {
+      console.log('Self-test 2 debug:', result2.debug)
+    }
+    
+    expect(result2.length, 'self-test 2: one oscillator should be audible').toBe(1)
+    expect(result2.silencedInTime, 'self-test 2: close() should silence').toBe(true)
+    
+    // Test case 3: gain->0 silences
+    const result3 = await page.evaluate(() => {
+      ;(window as any).__audioInstrumentation.oscillators.length = 0
+      const ctx = new AudioContext()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start(ctx.currentTime)
+      osc.stop(ctx.currentTime + 1)
+      
+      const muteSnapshot = {
+        perfNow: performance.now(),
+        contexts: new Map([[ctx, ctx.currentTime]])
+      }
+      
+      gain.gain.setValueAtTime(0, ctx.currentTime)
+      
+      const oscs = (window as any).__audioInstrumentation.oscillators
+      const analysis = (window as any).__analyzeMuteEffectiveness(oscs, muteSnapshot)
+      
+      return { length: analysis.length, silencedInTime: analysis[0]?.silencedInTime }
+    })
+    
+    expect(result3.length, 'self-test 3: one oscillator should be audible').toBe(1)
+    expect(result3.silencedInTime, 'self-test 3: gain->0 should silence').toBe(true)
+    
+    // Test case 4: no silencing -> must report false
+    const result4 = await page.evaluate(() => {
+      ;(window as any).__audioInstrumentation.oscillators.length = 0
+      const ctx = new AudioContext()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start(ctx.currentTime)
+      osc.stop(ctx.currentTime + 1)
+      
+      const muteSnapshot = {
+        perfNow: performance.now(),
+        contexts: new Map([[ctx, ctx.currentTime]])
+      }
+      
+      // No silencing call
+      
+      const oscs = (window as any).__audioInstrumentation.oscillators
+      const analysis = (window as any).__analyzeMuteEffectiveness(oscs, muteSnapshot)
+      
+      return { length: analysis.length, silencedInTime: analysis[0]?.silencedInTime }
+    })
+    
+    expect(result4.length, 'self-test 4: one oscillator should be audible').toBe(1)
+    expect(result4.silencedInTime, 'self-test 4: no silencing should report false').toBe(false)
+  })
+
   test('K10: Mute stops sounds that are already playing or scheduled', async ({ page }) => {
     // Spec K10: "всички звуци спират, докато не го натисне отново"
     // Regression: mute must stop sounds ALREADY playing or scheduled, not just block future calls
     // App creates new AudioContext per sound (GameScene.ts ~574) and schedules stop() in the future
     
-    // Instrument to track AudioContext, start/stop when arguments, gain calls, disconnect/close
-    await page.addInitScript(() => {
-      const oscillators: Array<{
-        ctx: any
-        startWhen: number
-        stopWhen: number
-        startCallTime: number
-        stopCallTime: number
-        disconnectCallTime: number
-        gainCalls: Array<{ method: string; value: number; time: number; callTime: number }>
-        ctxClosedAt: number
-        ctxSuspendedAt: number
-      }> = []
-      
-      const contextData = new Map<any, { closedAt: number; suspendedAt: number }>()
-      
-      // Patch BaseAudioContext/AudioContext prototype
-      const BaseProto = (window as any).BaseAudioContext?.prototype || (window as any).AudioContext?.prototype
-      
-      if (BaseProto) {
-        // Patch close()
-        const originalClose = BaseProto.close
-        if (originalClose) {
-          BaseProto.close = function() {
-            const data = contextData.get(this) || { closedAt: 0, suspendedAt: 0 }
-            data.closedAt = this.currentTime
-            contextData.set(this, data)
-            return originalClose.apply(this, arguments)
-          }
-        }
-        
-        // Patch suspend()
-        const originalSuspend = BaseProto.suspend
-        if (originalSuspend) {
-          BaseProto.suspend = function() {
-            const data = contextData.get(this) || { closedAt: 0, suspendedAt: 0 }
-            data.suspendedAt = this.currentTime
-            contextData.set(this, data)
-            return originalSuspend.apply(this, arguments)
-          }
-        }
-        
-        // Patch createOscillator
-        const originalCreateOscillator = BaseProto.createOscillator
-        if (originalCreateOscillator) {
-          BaseProto.createOscillator = function() {
-            const osc = originalCreateOscillator.call(this)
-            const ctx = this
-            const state = {
-              ctx,
-              startWhen: -1,
-              stopWhen: -1,
-              startCallTime: 0,
-              stopCallTime: 0,
-              disconnectCallTime: 0,
-              gainCalls: [] as any[],
-              ctxClosedAt: 0,
-              ctxSuspendedAt: 0
-            }
-            oscillators.push(state)
-            
-            const originalStart = osc.start
-            const originalStop = osc.stop
-            const originalDisconnect = osc.disconnect
-            
-            osc.start = function(when?: number) {
-              state.startWhen = when !== undefined ? when : ctx.currentTime
-              state.startCallTime = ctx.currentTime
-              return originalStart.apply(this, arguments)
-            }
-            
-            osc.stop = function(when?: number) {
-              state.stopWhen = when !== undefined ? when : ctx.currentTime
-              state.stopCallTime = ctx.currentTime
-              return originalStop.apply(this, arguments)
-            }
-            
-            osc.disconnect = function() {
-              state.disconnectCallTime = ctx.currentTime
-              return originalDisconnect.apply(this, arguments)
-            }
-            
-            return osc
-          }
-        }
-      }
-      
-      // Patch AudioParam methods
-      if ((window as any).AudioParam) {
-        const AudioParamProto = (window as any).AudioParam.prototype
-        
-        const patchGainMethod = (methodName: string) => {
-          const original = AudioParamProto[methodName]
-          if (original) {
-            AudioParamProto[methodName] = function(value: number, ...args: any[]) {
-              // Find oscillator with this gain param
-              for (const osc of oscillators) {
-                if (osc.gainCalls && this.toString().includes('gain')) {
-                  const time = args[0] !== undefined ? args[0] : (osc.ctx?.currentTime || 0)
-                  osc.gainCalls.push({
-                    method: methodName,
-                    value,
-                    time,
-                    callTime: osc.ctx?.currentTime || 0
-                  })
-                }
-              }
-              return original.apply(this, [value, ...args])
-            }
-          }
-        }
-        
-        patchGainMethod('setValueAtTime')
-        patchGainMethod('linearRampToValueAtTime')
-        patchGainMethod('exponentialRampToValueAtTime')
-        patchGainMethod('setTargetAtTime')
-      }
-      
-      (window as any).__audioInstrumentation = { oscillators, contextData }
-    })
+    // Same instrumentation as self-test
+    await page.addInitScript(audioInstrumentationCode + `
+      window.__audioInstrumentation = setupAudioInstrumentation();
+      window.__analyzeMuteEffectiveness = analyzeMuteEffectiveness;
+    `)
     
     await page.goto('/')
     await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
@@ -525,6 +755,7 @@ test.describe('PR #2 Review Regressions', () => {
     expect(stateBeforeMute.audibleCount, 'precondition: at least one oscillator must be audible before mute').toBeGreaterThan(0)
     
     // NOW MUTE via REAL control (click Phaser mute button)
+    // Snapshot will be captured by pointerdown listener BEFORE Phaser handles it
     const muteBtnClickX = canvasRect.left + (muteButtonBounds.x + muteButtonBounds.width / 2) * scale
     const muteBtnClickY = canvasRect.top + (muteButtonBounds.y + muteButtonBounds.height / 2) * scale
     
@@ -535,97 +766,52 @@ test.describe('PR #2 Review Regressions', () => {
     const isMuted = await page.evaluate(() => window.__tatematika!.isMuted())
     expect(isMuted, 'mute button must have toggled mute on').toBe(true)
     
-    // Get ctx.currentTime at mute and check effective end times
-    const muteAnalysis = await page.evaluate(() => {
-      const oscs = (window as any).__audioInstrumentation?.oscillators || []
-      const ctxData = (window as any).__audioInstrumentation?.contextData
+    // Get mute snapshot and analyze IN PAGE CONTEXT
+    const muteAnalysisResult = await page.evaluate(() => {
+      const instrumentation = (window as any).__audioInstrumentation
+      const muteSnapshot = instrumentation?.getMuteSnapshot()
+      const oscs = instrumentation?.oscillators || []
       
-      const audibleAtMute: any[] = []
-      
-      for (const osc of oscs) {
-        if (osc.startWhen >= 0 && osc.stopWhen > (osc.ctx?.currentTime + 0.1)) {
-          // This oscillator was audible at mute time
-          const ctxTimeAtMute = osc.ctx?.currentTime || 0
-          
-          // Find effective end: min of (stop issued after mute, gain->0 after mute, disconnect after mute, close/suspend after mute)
-          let effectiveEnd = osc.stopWhen // Original scheduled stop (before mute, doesn't count)
-          
-          // Check if stop was called AFTER mute (stopCallTime > startCallTime means stop was rescheduled)
-          if (osc.stopCallTime > osc.startCallTime + 0.01) {
-            effectiveEnd = Math.min(effectiveEnd, osc.stopCallTime)
-          }
-          
-          // Check disconnect after mute
-          if (osc.disconnectCallTime > 0) {
-            effectiveEnd = Math.min(effectiveEnd, osc.disconnectCallTime)
-          }
-          
-          // Check gain calls after mute
-          for (const gain of osc.gainCalls) {
-            if (gain.callTime > ctxTimeAtMute && (gain.value === 0 || gain.value < 0.001)) {
-              effectiveEnd = Math.min(effectiveEnd, gain.time)
-            }
-          }
-          
-          // Check context close/suspend
-          const ctxInfo = ctxData?.get(osc.ctx)
-          if (ctxInfo) {
-            if (ctxInfo.closedAt > ctxTimeAtMute) {
-              effectiveEnd = Math.min(effectiveEnd, ctxInfo.closedAt)
-            }
-            if (ctxInfo.suspendedAt > ctxTimeAtMute) {
-              effectiveEnd = Math.min(effectiveEnd, ctxInfo.suspendedAt)
-            }
-          }
-          
-          audibleAtMute.push({
-            stopWhen: osc.stopWhen,
-            ctxTimeAtMute,
-            effectiveEnd,
-            stopCallTime: osc.stopCallTime,
-            startCallTime: osc.startCallTime,
-            disconnectCallTime: osc.disconnectCallTime,
-            gainCalls: osc.gainCalls.length,
-            silencedInTime: effectiveEnd <= ctxTimeAtMute + 0.05
-          })
-        }
+      if (!muteSnapshot) {
+        return { snapshotMissing: true, audibleAtMute: [] }
       }
       
-      return { audibleAtMute }
+      const audibleAtMute = (window as any).__analyzeMuteEffectiveness(oscs, muteSnapshot)
+      
+      return {
+        snapshotMissing: false,
+        audibleAtMute
+      }
     })
     
-    // Assert: all audible oscillators must have effectiveEnd <= ctxTimeAtMute + 0.05
-    for (const osc of muteAnalysis.audibleAtMute) {
+    expect(muteAnalysisResult.snapshotMissing, 'mute snapshot must have been captured').toBe(false)
+    expect(muteAnalysisResult.audibleAtMute.length, 'precondition: at least one oscillator must be audible at mute').toBeGreaterThan(0)
+    
+    // Assert: all audible oscillators must be silenced
+    for (const osc of muteAnalysisResult.audibleAtMute) {
       expect(
         osc.silencedInTime,
-        `oscillator still scheduled to play until ctx t=${osc.stopWhen.toFixed(3)} after mute at t=${osc.ctxTimeAtMute.toFixed(3)} (effective end ${osc.effectiveEnd.toFixed(3)})`
+        `oscillator still scheduled to play until ctx t=${osc.originalStopWhen.toFixed(3)} after mute at t=${osc.ctxTimeAtMute.toFixed(3)} (effective end ${osc.effectiveEnd === Infinity ? 'never' : osc.effectiveEnd.toFixed(3)}, silenced by ${osc.silencedBy})`
       ).toBe(true)
     }
     
     // Verify no NEW sounds start while muted (real click)
     const countBefore = await page.evaluate(() => 
       (window as any).__audioInstrumentation?.oscillators.length || 0)
+    const wrongBalloon2 = state.balloons.find((b: any) => !b.isCorrect && b.id !== wrongBalloon.id)!
+    const balloonBounds2 = await page.evaluate((id) => 
+      window.__tatematika!.getBalloonBounds(id), wrongBalloon2.id)
     
-    // Wait for cat idle
-    await expect.poll(async () => {
-      const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-      return !jumpState.isJumping
-    }, { timeout: 5000, intervals: [50] }).toBe(true)
+    const clickX2 = canvasRect.left + (balloonBounds2.x + balloonBounds2.width / 2) * scale
+    const clickY2 = canvasRect.top + (balloonBounds2.y + balloonBounds2.height / 2) * scale
     
-    // Click another wrong balloon
-    const state2 = await page.evaluate(() => window.__tatematika!.getGameState())
-    const wrongBalloon2 = state2.balloons.find((b: any) => !b.isCorrect && b.id !== wrongBalloon.id)!
-    const bounds2 = await page.evaluate((id) => window.__tatematika!.getBalloonBounds(id), wrongBalloon2.id)
-    
-    const clickX2 = canvasRect.left + (bounds2.x + bounds2.width / 2) * scale
-    const clickY2 = canvasRect.top + (bounds2.y + bounds2.height / 2) * scale
     await page.mouse.click(clickX2, clickY2)
     await page.waitForTimeout(200)
     
     const countAfter = await page.evaluate(() => 
       (window as any).__audioInstrumentation?.oscillators.length || 0)
     
-    expect(countAfter, 'no sounds must start while muted').toBe(countBefore)
+    expect(countAfter, 'mute must block new sounds').toBe(countBefore)
   })
 
   // ============================================================================
@@ -792,23 +978,27 @@ test.describe('PR #2 Review Regressions', () => {
     const oscCountAfterScenario = await page.evaluate(() => (window as any).__oscillatorStarts.length)
     const totalSoundsInScenario = oscCountAfterScenario - oscCountBeforeScenario
     
-    // Fully handled = error +1 AND B bounced AND total sounds == N (baseline) + N (tap on B)
+    // Fully handled = error +1 AND B bounced AND total sounds == 2*N (baseline N + tap on B N)
     // Fully ignored = no error AND no B bounce AND total sounds == N (only from first tap A)
     
-    const fullyHandled = balloonBErrorIncremented && balloonBBounced && (totalSoundsInScenario >= N + N)
-    const fullyIgnored = !balloonBErrorIncremented && !balloonBBounced && (totalSoundsInScenario <= N + 1)
+    const fullyHandled = balloonBErrorIncremented && balloonBBounced && (totalSoundsInScenario === 2 * N)
+    const fullyIgnored = !balloonBErrorIncremented && !balloonBBounced && (totalSoundsInScenario === N)
     
     if (!fullyHandled && !fullyIgnored) {
       // Partial handling - this is the failure we expect
       const parts: string[] = []
       if (balloonBErrorIncremented) parts.push('error counted')
       if (balloonBBounced) parts.push('B bounced')
-      if (totalSoundsInScenario >= N + N) parts.push(`sound played (${totalSoundsInScenario} >= ${N + N})`)
+      if (totalSoundsInScenario === 2 * N) parts.push(`sound played (total=${totalSoundsInScenario}, expected 2*${N})`)
       
       const missing: string[] = []
       if (!balloonBErrorIncremented) missing.push('no error')
       if (!balloonBBounced) missing.push('no B bounce')
-      if (totalSoundsInScenario < N + N) missing.push(`insufficient sound (${totalSoundsInScenario} < ${N + N})`)
+      if (totalSoundsInScenario !== 2 * N && totalSoundsInScenario !== N) {
+        missing.push(`sound count=${totalSoundsInScenario}, expected exactly ${N} (ignored) or ${2 * N} (handled)`)
+      } else if (totalSoundsInScenario === N) {
+        missing.push(`sound count=${N} (ignored level) but error/bounce detected`)
+      }
       
       expect(false, `wrong tap during jump is HALF-HANDLED: ${parts.join(', ')} but ${missing.join(', ')}`).toBe(true)
     }
