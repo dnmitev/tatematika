@@ -368,12 +368,12 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       expect(result.levelCompleteAppeared, 'Level complete screen should not appear').toBe(false)
       expect(result.cells.length, 'Should have recorded all rounds').toBe(rounds)
       
-      // Determine expected cells based on typical layout
-      // Count 4: typically 2 rows × 2 cols
-      // Count 5: typically 2 rows (3 on top, 2 on bottom)
+      // Determine expected cells based on actual layout
+      // Count 4: 2×2 grid (4 cells)
+      // Count 5: 4+1 layout (4 on top row, 1 on bottom row)
       const expectedCells = count === 4 
         ? [{ row: 0, col: 0 }, { row: 0, col: 1 }, { row: 1, col: 0 }, { row: 1, col: 1 }]
-        : [{ row: 0, col: 0 }, { row: 0, col: 1 }, { row: 0, col: 2 }, { row: 1, col: 0 }, { row: 1, col: 1 }]
+        : [{ row: 0, col: 0 }, { row: 0, col: 1 }, { row: 0, col: 2 }, { row: 0, col: 3 }, { row: 1, col: 0 }]
       
       // Track which cells have been visited
       const visitedCells = new Set<string>()
@@ -416,10 +416,12 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       expect(result.levelCompleteAppeared, 'Level complete screen should not appear').toBe(false)
       expect(result.cells.length, 'Should have recorded all rounds').toBe(rounds)
       
-      // Determine expected cells based on typical layout
+      // Determine expected cells based on actual layout
+      // Count 4: 2×2 grid (4 cells)
+      // Count 5: 4+1 layout (4 on top row, 1 on bottom row)
       const expectedCells = count === 4 
         ? [{ row: 0, col: 0 }, { row: 0, col: 1 }, { row: 1, col: 0 }, { row: 1, col: 1 }]
-        : [{ row: 0, col: 0 }, { row: 0, col: 1 }, { row: 0, col: 2 }, { row: 1, col: 0 }, { row: 1, col: 1 }]
+        : [{ row: 0, col: 0 }, { row: 0, col: 1 }, { row: 0, col: 2 }, { row: 0, col: 3 }, { row: 1, col: 0 }]
       
       // Track which cells have been visited
       const visitedCells = new Set<string>()
