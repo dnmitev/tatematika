@@ -14,6 +14,38 @@ import { test, expect } from '@playwright/test'
  * re-executed.
  */
 
+async function installFrameRecorder(page: any) {
+  await page.evaluate(() => {
+    const game = window.__tatematika!.getGame()
+    const scene = game.scene.getScene('GameScene') as any
+    
+    // Clear any existing recorder
+    window.__balloonFrameRecorder = new Map<string, Array<{ x: number; y: number; frame: number }>>()
+    let frameCount = 0
+    
+    // Remove any previous postupdate listener
+    scene.events.off('postupdate')
+    
+    scene.events.on('postupdate', () => {
+      frameCount++
+      const state = window.__tatematika!.getGameState()
+      for (const balloon of state.balloons) {
+        const bounds = window.__tatematika!.getBalloonBounds(balloon.id)
+        if (bounds) {
+          if (!window.__balloonFrameRecorder.has(balloon.id)) {
+            window.__balloonFrameRecorder.set(balloon.id, [])
+          }
+          window.__balloonFrameRecorder.get(balloon.id)!.push({
+            x: bounds.x,
+            y: bounds.y,
+            frame: frameCount
+          })
+        }
+      }
+    })
+  })
+}
+
 test.beforeEach(async ({ page }) => {
   // Instrument oscillator to count sounds
   await page.addInitScript(() => {
@@ -37,33 +69,7 @@ test.beforeEach(async ({ page }) => {
   await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
   
   // Install postupdate recorder for bounce detection
-  await page.evaluate(() => {
-    const game = window.__tatematika!.getGame()
-    const scene = game.scene.getScene('GameScene') as any
-    
-    if (!window.__balloonFrameRecorder) {
-      window.__balloonFrameRecorder = new Map<string, Array<{ x: number; y: number; frame: number }>>()
-      let frameCount = 0
-      
-      scene.events.on('postupdate', () => {
-        frameCount++
-        const state = window.__tatematika!.getGameState()
-        for (const balloon of state.balloons) {
-          const bounds = window.__tatematika!.getBalloonBounds(balloon.id)
-          if (bounds) {
-            if (!window.__balloonFrameRecorder.has(balloon.id)) {
-              window.__balloonFrameRecorder.set(balloon.id, [])
-            }
-            window.__balloonFrameRecorder.get(balloon.id)!.push({
-              x: bounds.x,
-              y: bounds.y,
-              frame: frameCount
-            })
-          }
-        }
-      })
-    }
-  })
+  await installFrameRecorder(page)
 })
 
 async function getCanvasCoordinates(page: any) {
@@ -103,6 +109,16 @@ function checkBounce(frames: Array<{ x: number; y: number; frame: number }>): bo
   return false
 }
 
+function getBounceDiagnostic(frames: Array<{ x: number; y: number; frame: number }>): string {
+  if (frames.length === 0) {
+    return 'No frames recorded'
+  }
+  const yValues = frames.map(f => f.y)
+  const minY = Math.min(...yValues)
+  const maxY = Math.max(...yValues)
+  return `${frames.length} frames, y range [${minY.toFixed(1)}, ${maxY.toFixed(1)}]`
+}
+
 test('K12: Repeated inputs during correct balloon action are fully ignored', async ({ page }) => {
   // Check that getActionPhase hook exists
   const hasGetActionPhase = await page.evaluate(() => typeof window.__tatematika!.getActionPhase === 'function')
@@ -132,9 +148,12 @@ test('K12: Repeated inputs during correct balloon action are fully ignored', asy
   const oscCountBefore = await page.evaluate(() => (window as any).__oscillatorStarts.length)
   
   // Install phase-based input injector
-  await page.evaluate((correctId, wrongId) => {
+  await page.evaluate(({ correctId, wrongId }) => {
     const game = window.__tatematika!.getGame()
     const scene = game.scene.getScene('GameScene') as any
+    const canvas = document.querySelector('canvas')!
+    const rect = canvas.getBoundingClientRect()
+    const scale = rect.width / game.scale.width
     
     window.__phaseInputs = []
     let lastPhase = 'idle'
@@ -142,31 +161,61 @@ test('K12: Repeated inputs during correct balloon action are fully ignored', asy
     const injectInput = () => {
       const currentPhase = window.__tatematika!.getActionPhase!()
       
-      // On first frame of each phase, dispatch synthetic input
+      // On first frame of each phase, dispatch real DOM input
       if (currentPhase !== lastPhase && currentPhase !== 'idle') {
         window.__phaseInputs.push(currentPhase)
         
-        // Dispatch pointer event on correct balloon
+        // Dispatch real pointer events on correct balloon
         const correctBounds = window.__tatematika!.getBalloonBounds(correctId)
         if (correctBounds) {
-          const x = correctBounds.x + correctBounds.width / 2
-          const y = correctBounds.y + correctBounds.height / 2
-          scene.input.emit('pointerdown', { x, y, button: 0 })
+          const gameX = correctBounds.x + correctBounds.width / 2
+          const gameY = correctBounds.y + correctBounds.height / 2
+          const clientX = rect.left + gameX * scale
+          const clientY = rect.top + gameY * scale
+          
+          canvas.dispatchEvent(new PointerEvent('pointerdown', { 
+            bubbles: true, clientX, clientY, isPrimary: true, button: 0 
+          }))
+          canvas.dispatchEvent(new PointerEvent('pointerup', { 
+            bubbles: true, clientX, clientY, isPrimary: true, button: 0 
+          }))
+          canvas.dispatchEvent(new MouseEvent('mousedown', { 
+            bubbles: true, clientX, clientY, button: 0 
+          }))
+          canvas.dispatchEvent(new MouseEvent('mouseup', { 
+            bubbles: true, clientX, clientY, button: 0 
+          }))
         }
         
-        // Dispatch pointer event on wrong balloon if exists
+        // Dispatch real pointer events on wrong balloon if exists
         if (wrongId) {
           const wrongBounds = window.__tatematika!.getBalloonBounds(wrongId)
           if (wrongBounds) {
-            const x = wrongBounds.x + wrongBounds.width / 2
-            const y = wrongBounds.y + wrongBounds.height / 2
-            scene.input.emit('pointerdown', { x, y, button: 0 })
+            const gameX = wrongBounds.x + wrongBounds.width / 2
+            const gameY = wrongBounds.y + wrongBounds.height / 2
+            const clientX = rect.left + gameX * scale
+            const clientY = rect.top + gameY * scale
+            
+            canvas.dispatchEvent(new PointerEvent('pointerdown', { 
+              bubbles: true, clientX, clientY, isPrimary: true, button: 0 
+            }))
+            canvas.dispatchEvent(new PointerEvent('pointerup', { 
+              bubbles: true, clientX, clientY, isPrimary: true, button: 0 
+            }))
+            canvas.dispatchEvent(new MouseEvent('mousedown', { 
+              bubbles: true, clientX, clientY, button: 0 
+            }))
+            canvas.dispatchEvent(new MouseEvent('mouseup', { 
+              bubbles: true, clientX, clientY, button: 0 
+            }))
           }
         }
         
-        // Dispatch keyboard events
-        scene.input.keyboard.emit('keydown-SPACE')
-        scene.input.keyboard.emit('keydown-UP')
+        // Dispatch real keyboard events
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space' }))
+        window.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space' }))
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', code: 'ArrowUp' }))
+        window.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowUp', code: 'ArrowUp' }))
       }
       
       lastPhase = currentPhase
@@ -174,7 +223,7 @@ test('K12: Repeated inputs during correct balloon action are fully ignored', asy
     
     scene.events.on('postupdate', injectInput)
     window.__stopPhaseInjector = () => scene.events.off('postupdate', injectInput)
-  }, correctBalloon.id, wrongBalloons[0]?.id)
+  }, { correctId: correctBalloon.id, wrongId: wrongBalloons[0]?.id })
   
   // Click correct balloon to start action
   await clickBalloon(page, correctBalloon.id, canvas)
@@ -228,7 +277,8 @@ test('K12: Repeated inputs during correct balloon action are fully ignored', asy
   for (const wrongBalloon of wrongBalloons) {
     const frames = balloonFrames[wrongBalloon.id] || []
     const bounced = checkBounce(frames)
-    expect(bounced, `Wrong balloon ${wrongBalloon.id} should not bounce from rejected inputs`).toBe(false)
+    const diagnostic = getBounceDiagnostic(frames)
+    expect(bounced, `Wrong balloon ${wrongBalloon.id} should not bounce from rejected inputs (${diagnostic})`).toBe(false)
   }
   
   // Verify new round started
@@ -241,10 +291,14 @@ test('K12: Repeated inputs during correct balloon action are fully ignored', asy
 })
 
 test('K13: Repeated inputs during wrong balloon action are fully ignored', async ({ page }) => {
+  // Check that getActionPhase hook exists
+  const hasGetActionPhase = await page.evaluate(() => typeof window.__tatematika!.getActionPhase === 'function')
+  expect(hasGetActionPhase, 'K13 CONTRACT: getActionPhase hook must exist in src/main.ts').toBe(true)
+  
   // Wait for cat to be idle
   await expect.poll(async () => {
-    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    return !jumpState.isJumping
+    const phase = await page.evaluate(() => window.__tatematika!.getActionPhase!())
+    return phase === 'idle'
   }, { timeout: 5000, intervals: [50] }).toBe(true)
   
   const state = await page.evaluate(() => window.__tatematika!.getGameState())
@@ -267,13 +321,13 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   await clickBalloon(page, wrongBalloon.id, canvas)
   
   await expect.poll(async () => {
-    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    return jumpState.isJumping
+    const phase = await page.evaluate(() => window.__tatematika!.getActionPhase!())
+    return phase !== 'idle'
   }, { timeout: 2000, intervals: [50] }).toBe(true)
   
   await expect.poll(async () => {
-    const jumpState = await page.evaluate(() => window.__tatematika!.getCatJumpState())
-    return !jumpState.isJumping
+    const phase = await page.evaluate(() => window.__tatematika!.getActionPhase!())
+    return phase === 'idle'
   }, { timeout: 5000, intervals: [50] }).toBe(true)
   
   await expect.poll(async () => {
@@ -292,17 +346,15 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
     return result
   })
   
-  const baselineBounced = checkBounce(baselineBalloonFrames[wrongBalloon.id] || [])
-  expect(baselineBounced, 'Baseline: wrong balloon should bounce once').toBe(true)
+  const baselineFrames = baselineBalloonFrames[wrongBalloon.id] || []
+  const baselineBounced = checkBounce(baselineFrames)
+  const baselineDiagnostic = getBounceDiagnostic(baselineFrames)
+  expect(baselineBounced, `Baseline: wrong balloon should bounce once (${baselineDiagnostic})`).toBe(true)
   
   // Now start the actual test: reset state and retry with rejected inputs
   await page.reload()
   await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
   await installFrameRecorder(page)
-  
-  // Check that getActionPhase hook exists after reload
-  const hasGetActionPhase = await page.evaluate(() => typeof window.__tatematika!.getActionPhase === 'function')
-  expect(hasGetActionPhase, 'K13 CONTRACT: getActionPhase hook must be implemented').toBe(true)
   
   await expect.poll(async () => {
     const phase = await page.evaluate(() => window.__tatematika!.getActionPhase!())
@@ -328,9 +380,12 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   const oscCountBefore = await page.evaluate(() => (window as any).__oscillatorStarts.length)
   
   // Install phase-based input injector
-  await page.evaluate((correctId, wrongId) => {
+  await page.evaluate(({ correctId, wrongId }) => {
     const game = window.__tatematika!.getGame()
     const scene = game.scene.getScene('GameScene') as any
+    const canvas = document.querySelector('canvas')!
+    const rect = canvas.getBoundingClientRect()
+    const scale = rect.width / game.scale.width
     
     window.__phaseInputs = []
     let lastPhase = 'idle'
@@ -338,29 +393,59 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
     const injectInput = () => {
       const currentPhase = window.__tatematika!.getActionPhase!()
       
-      // On first frame of each phase, dispatch synthetic input
+      // On first frame of each phase, dispatch real DOM input
       if (currentPhase !== lastPhase && currentPhase !== 'idle') {
         window.__phaseInputs.push(currentPhase)
         
-        // Dispatch pointer event on correct balloon
+        // Dispatch real pointer events on correct balloon
         const correctBounds = window.__tatematika!.getBalloonBounds(correctId)
         if (correctBounds) {
-          const x = correctBounds.x + correctBounds.width / 2
-          const y = correctBounds.y + correctBounds.height / 2
-          scene.input.emit('pointerdown', { x, y, button: 0 })
+          const gameX = correctBounds.x + correctBounds.width / 2
+          const gameY = correctBounds.y + correctBounds.height / 2
+          const clientX = rect.left + gameX * scale
+          const clientY = rect.top + gameY * scale
+          
+          canvas.dispatchEvent(new PointerEvent('pointerdown', { 
+            bubbles: true, clientX, clientY, isPrimary: true, button: 0 
+          }))
+          canvas.dispatchEvent(new PointerEvent('pointerup', { 
+            bubbles: true, clientX, clientY, isPrimary: true, button: 0 
+          }))
+          canvas.dispatchEvent(new MouseEvent('mousedown', { 
+            bubbles: true, clientX, clientY, button: 0 
+          }))
+          canvas.dispatchEvent(new MouseEvent('mouseup', { 
+            bubbles: true, clientX, clientY, button: 0 
+          }))
         }
         
-        // Dispatch pointer event on wrong balloon
+        // Dispatch real pointer events on wrong balloon
         const wrongBounds = window.__tatematika!.getBalloonBounds(wrongId)
         if (wrongBounds) {
-          const x = wrongBounds.x + wrongBounds.width / 2
-          const y = wrongBounds.y + wrongBounds.height / 2
-          scene.input.emit('pointerdown', { x, y, button: 0 })
+          const gameX = wrongBounds.x + wrongBounds.width / 2
+          const gameY = wrongBounds.y + wrongBounds.height / 2
+          const clientX = rect.left + gameX * scale
+          const clientY = rect.top + gameY * scale
+          
+          canvas.dispatchEvent(new PointerEvent('pointerdown', { 
+            bubbles: true, clientX, clientY, isPrimary: true, button: 0 
+          }))
+          canvas.dispatchEvent(new PointerEvent('pointerup', { 
+            bubbles: true, clientX, clientY, isPrimary: true, button: 0 
+          }))
+          canvas.dispatchEvent(new MouseEvent('mousedown', { 
+            bubbles: true, clientX, clientY, button: 0 
+          }))
+          canvas.dispatchEvent(new MouseEvent('mouseup', { 
+            bubbles: true, clientX, clientY, button: 0 
+          }))
         }
         
-        // Dispatch keyboard events
-        scene.input.keyboard.emit('keydown-SPACE')
-        scene.input.keyboard.emit('keydown-LEFT')
+        // Dispatch real keyboard events
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space' }))
+        window.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space' }))
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', code: 'ArrowLeft' }))
+        window.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowLeft', code: 'ArrowLeft' }))
       }
       
       lastPhase = currentPhase
@@ -368,7 +453,7 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
     
     scene.events.on('postupdate', injectInput)
     window.__stopPhaseInjector = () => scene.events.off('postupdate', injectInput)
-  }, correctBalloon2.id, wrongBalloon2.id)
+  }, { correctId: correctBalloon2.id, wrongId: wrongBalloon2.id })
   
   // Click wrong balloon to start action
   await clickBalloon(page, wrongBalloon2.id, canvas2)
@@ -424,14 +509,16 @@ test('K13: Repeated inputs during wrong balloon action are fully ignored', async
   // Wrong balloon should bounce exactly once (from first tap)
   const wrongBalloonFrames = balloonFrames[wrongBalloon2.id] || []
   const wrongBalloonBounced = checkBounce(wrongBalloonFrames)
-  expect(wrongBalloonBounced, 'Wrong balloon should bounce exactly once').toBe(true)
+  const wrongBalloonDiagnostic = getBounceDiagnostic(wrongBalloonFrames)
+  expect(wrongBalloonBounced, `Wrong balloon should bounce exactly once (${wrongBalloonDiagnostic})`).toBe(true)
   
   // Other balloons should not bounce from rejected inputs
   const otherBalloons = state2.balloons.filter((b: any) => b.id !== wrongBalloon2.id)
   for (const otherBalloon of otherBalloons) {
     const frames = balloonFrames[otherBalloon.id] || []
     const bounced = checkBounce(frames)
-    expect(bounced, `Other balloon ${otherBalloon.id} should not bounce from rejected inputs`).toBe(false)
+    const diagnostic = getBounceDiagnostic(frames)
+    expect(bounced, `Other balloon ${otherBalloon.id} should not bounce from rejected inputs (${diagnostic})`).toBe(false)
   }
   
   // Cat is idle, nothing queued
