@@ -68,8 +68,19 @@ async function setBalloonCount(page: any, count: number) {
   }, { timeout: 5000, intervals: [50] }).toBe(count)
 }
 
-async function playRoundsAndRecordSlots(page: any, count: number, rounds: number): Promise<{ slots: number[], roundTokens: number[], levelCompleteAppeared: boolean }> {
+interface CellPosition {
+  row: number
+  col: number
+}
+
+async function playRoundsAndRecordSlots(page: any, count: number, rounds: number): Promise<{ 
+  slots: number[], 
+  cells: CellPosition[],
+  roundTokens: number[], 
+  levelCompleteAppeared: boolean 
+}> {
   const slots: number[] = []
+  const cells: CellPosition[] = []
   const roundTokens: number[] = []
   let levelCompleteAppeared = false
   
@@ -124,17 +135,18 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
     const currentToken = await page.evaluate(() => window.__roundToken)
     roundTokens.push(currentToken)
     
-    // Get all balloon centerX positions sorted to find slot
+    // Get all balloon positions (X and Y) for 2D cell tracking
     const balloonPositions = await page.evaluate(() => {
       const state = window.__tatematika!.getGameState()
-      const positions: Array<{ id: string, centerX: number }> = []
+      const positions: Array<{ id: string, centerX: number, centerY: number }> = []
       
       for (const b of state.balloons) {
         const bounds = window.__tatematika!.getBalloonBounds(b.id)
         if (bounds) {
           positions.push({
             id: b.id,
-            centerX: bounds.x + bounds.width / 2
+            centerX: bounds.x + bounds.width / 2,
+            centerY: bounds.y + bounds.height / 2
           })
         }
       }
@@ -142,13 +154,60 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
       return positions
     })
     
-    // Sort by centerX to get left-to-right order
-    balloonPositions.sort((a, b) => a.centerX - b.centerX)
+    // Sort by centerX to get left-to-right order (for 1D slot)
+    const sortedByX = [...balloonPositions].sort((a, b) => a.centerX - b.centerX)
     
     // Find correct balloon's slot (0-indexed from left)
-    const correctSlot = balloonPositions.findIndex(p => p.id === correctBalloon.id)
+    const correctSlot = sortedByX.findIndex(p => p.id === correctBalloon.id)
     if (correctSlot >= 0) {
       slots.push(correctSlot)
+    }
+    
+    // For counts 4 and 5: track 2D cell (row, column)
+    if (count >= 4) {
+      // Cluster balloons into rows by centerY (tolerance: 50px)
+      const rowTolerance = 50
+      const rows: Array<Array<{ id: string, centerX: number, centerY: number }>> = []
+      
+      for (const pos of balloonPositions) {
+        let foundRow = false
+        for (const row of rows) {
+          if (Math.abs(row[0].centerY - pos.centerY) < rowTolerance) {
+            row.push(pos)
+            foundRow = true
+            break
+          }
+        }
+        if (!foundRow) {
+          rows.push([pos])
+        }
+      }
+      
+      // Sort rows by average Y (top to bottom)
+      rows.sort((a, b) => {
+        const avgA = a.reduce((sum, p) => sum + p.centerY, 0) / a.length
+        const avgB = b.reduce((sum, p) => sum + p.centerY, 0) / b.length
+        return avgA - avgB
+      })
+      
+      // Within each row, sort by centerX (left to right)
+      for (const row of rows) {
+        row.sort((a, b) => a.centerX - b.centerX)
+      }
+      
+      // Find correct balloon's cell (row, col)
+      let correctCell: CellPosition | null = null
+      for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+        const colIndex = rows[rowIndex].findIndex(p => p.id === correctBalloon.id)
+        if (colIndex >= 0) {
+          correctCell = { row: rowIndex, col: colIndex }
+          break
+        }
+      }
+      
+      if (correctCell) {
+        cells.push(correctCell)
+      }
     }
     
     // Store current round token before click
@@ -175,7 +234,7 @@ async function playRoundsAndRecordSlots(page: any, count: number, rounds: number
     }, { timeout: 10000, intervals: [50] }).toBe(true)
   }
   
-  return { slots, roundTokens, levelCompleteAppeared }
+  return { slots, cells, roundTokens, levelCompleteAppeared }
 }
 
 test.describe('Shuffle Distribution - 1280×800', () => {
@@ -289,6 +348,103 @@ test.describe('Shuffle Distribution - 1280×800', () => {
       // Should not be slot 0 in every round
       const allSlot0 = result.slots.every(s => s === 0)
       expect(allSlot0, 'Correct balloon should not always be in slot 0').toBe(false)
+    })
+  }
+  
+  // 2D Cell distribution tests for counts 4 and 5 (multi-row layouts)
+  for (const count of [4, 5]) {
+    test(`Count ${count} Seed A: 2D cell distribution - every cell visited (60 rounds)`, async ({ page }) => {
+      test.setTimeout(180000) // 3 minutes for 60 rounds
+      
+      const rounds = 60
+      
+      await page.addInitScript(getMulberry32Code(SEED_A))
+      await page.goto('/')
+      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+      
+      await setBalloonCount(page, count)
+      const result = await playRoundsAndRecordSlots(page, count, rounds)
+      
+      expect(result.levelCompleteAppeared, 'Level complete screen should not appear').toBe(false)
+      expect(result.cells.length, 'Should have recorded all rounds').toBe(rounds)
+      
+      // Determine expected cells based on typical layout
+      // Count 4: typically 2 rows × 2 cols
+      // Count 5: typically 2 rows (3 on top, 2 on bottom)
+      const expectedCells = count === 4 
+        ? [{ row: 0, col: 0 }, { row: 0, col: 1 }, { row: 1, col: 0 }, { row: 1, col: 1 }]
+        : [{ row: 0, col: 0 }, { row: 0, col: 1 }, { row: 0, col: 2 }, { row: 1, col: 0 }, { row: 1, col: 1 }]
+      
+      // Track which cells have been visited
+      const visitedCells = new Set<string>()
+      for (const cell of result.cells) {
+        visitedCells.add(`${cell.row},${cell.col}`)
+      }
+      
+      // Assert every expected cell was visited at least once
+      for (const expectedCell of expectedCells) {
+        const cellKey = `${expectedCell.row},${expectedCell.col}`
+        expect(visitedCells.has(cellKey), 
+          `Cell (row=${expectedCell.row}, col=${expectedCell.col}) should be visited at least once`
+        ).toBe(true)
+      }
+      
+      // Assert row is not constant (should vary across rounds)
+      const rows = result.cells.map(c => c.row)
+      const uniqueRows = new Set(rows)
+      expect(uniqueRows.size, 
+        `Correct balloon should appear in multiple rows (found rows: ${Array.from(uniqueRows).join(', ')})`
+      ).toBeGreaterThan(1)
+      
+      // Should not be all in row 0
+      const allRow0 = rows.every(r => r === 0)
+      expect(allRow0, 'Correct balloon should not always be in row 0').toBe(false)
+    })
+    
+    test(`Count ${count} Seed B: 2D cell distribution - every cell visited (60 rounds)`, async ({ page }) => {
+      test.setTimeout(180000) // 3 minutes for 60 rounds
+      
+      const rounds = 60
+      
+      await page.addInitScript(getMulberry32Code(SEED_B))
+      await page.goto('/')
+      await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: 5000 })
+      
+      await setBalloonCount(page, count)
+      const result = await playRoundsAndRecordSlots(page, count, rounds)
+      
+      expect(result.levelCompleteAppeared, 'Level complete screen should not appear').toBe(false)
+      expect(result.cells.length, 'Should have recorded all rounds').toBe(rounds)
+      
+      // Determine expected cells based on typical layout
+      const expectedCells = count === 4 
+        ? [{ row: 0, col: 0 }, { row: 0, col: 1 }, { row: 1, col: 0 }, { row: 1, col: 1 }]
+        : [{ row: 0, col: 0 }, { row: 0, col: 1 }, { row: 0, col: 2 }, { row: 1, col: 0 }, { row: 1, col: 1 }]
+      
+      // Track which cells have been visited
+      const visitedCells = new Set<string>()
+      for (const cell of result.cells) {
+        visitedCells.add(`${cell.row},${cell.col}`)
+      }
+      
+      // Assert every expected cell was visited at least once
+      for (const expectedCell of expectedCells) {
+        const cellKey = `${expectedCell.row},${expectedCell.col}`
+        expect(visitedCells.has(cellKey), 
+          `Cell (row=${expectedCell.row}, col=${expectedCell.col}) should be visited at least once`
+        ).toBe(true)
+      }
+      
+      // Assert row is not constant (should vary across rounds)
+      const rows = result.cells.map(c => c.row)
+      const uniqueRows = new Set(rows)
+      expect(uniqueRows.size, 
+        `Correct balloon should appear in multiple rows (found rows: ${Array.from(uniqueRows).join(', ')})`
+      ).toBeGreaterThan(1)
+      
+      // Should not be all in row 0
+      const allRow0 = rows.every(r => r === 0)
+      expect(allRow0, 'Correct balloon should not always be in row 0').toBe(false)
     })
   }
 })
