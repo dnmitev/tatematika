@@ -194,10 +194,25 @@ export class GameScene extends Phaser.Scene {
     
     const safetyMargin = 15
     const minVisibleJump = 20
-    const maxJump = 80
-    const calculatedJump = Math.max(minVisibleJump, minClearance - safetyMargin)
+    const maxJumpForNonTargets = 80
+    let calculatedJump = Math.max(minVisibleJump, minClearance - safetyMargin)
     
-    return Math.min(calculatedJump, maxJump)
+    // Cap at max for non-target avoidance
+    calculatedJump = Math.min(calculatedJump, maxJumpForNonTargets)
+    
+    // Ensure cat actually reaches the target balloon (can exceed maxJumpForNonTargets if needed)
+    if (targetBalloon && targetBalloon.sprite && targetBalloon.sprite.input) {
+      const hitArea = targetBalloon.sprite.input.hitArea as Phaser.Geom.Ellipse
+      const targetRadius = hitArea ? hitArea.height / 2 : 32
+      const targetBottom = targetBalloon.y + targetRadius
+      const heightToReachTarget = catEarsTop - targetBottom
+      
+      // Cat needs to jump at least this high to reach target bottom
+      // Allow exceeding maxJumpForNonTargets to reach the actual target
+      calculatedJump = Math.max(calculatedJump, heightToReachTarget)
+    }
+    
+    return calculatedJump
   }
 
   private drawCat(graphics: Phaser.GameObjects.Graphics, x: number, y: number) {
