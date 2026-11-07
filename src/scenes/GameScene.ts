@@ -826,11 +826,9 @@ export class GameScene extends Phaser.Scene {
     
     for (const balloon of this.balloonSprites) {
       if (balloon.sprite && balloon.sprite.input) {
-        const hitArea = balloon.sprite.input.hitArea as Phaser.Geom.Ellipse
-        const radiusX = hitArea.width / 2
-        const radiusY = hitArea.height / 2
-        const dx = (pointer.x - balloon.x) / radiusX
-        const dy = (pointer.y - balloon.y) / radiusY
+        const { centerX, centerY, radiusX, radiusY } = this.getRenderedBalloonEllipse(balloon)
+        const dx = (pointer.x - centerX) / radiusX
+        const dy = (pointer.y - centerY) / radiusY
         if (dx * dx + dy * dy <= 1) {
           this.handleBalloonClick(balloon.id)
           break
@@ -1422,25 +1420,26 @@ export class GameScene extends Phaser.Scene {
     return { isJumping: this.catIsJumping, restingY: this.catJumpStartY }
   }
 
+  // The hit ellipse in game coordinates, following the sprite's bounce offset and pop scale
+  // the same way Phaser's own sprite hit test does.
+  private getRenderedBalloonEllipse(balloon: BalloonSprite) {
+    const hitArea = balloon.sprite.input?.hitArea as Phaser.Geom.Ellipse | undefined
+    return {
+      centerX: balloon.sprite.x,
+      centerY: balloon.sprite.y,
+      radiusX: ((hitArea?.width ?? balloon.width) / 2) * Math.abs(balloon.sprite.scaleX),
+      radiusY: ((hitArea?.height ?? balloon.height) / 2) * Math.abs(balloon.sprite.scaleY)
+    }
+  }
+
   public getBalloonBounds(balloonId: string) {
     const balloon = this.balloonSprites.find(b => b.id === balloonId)
     if (!balloon) return null
-    
-    if (balloon.sprite && balloon.sprite.input) {
-      const hitArea = balloon.sprite.input.hitArea as Phaser.Geom.Ellipse
-      return {
-        x: balloon.x - hitArea.width / 2,
-        y: balloon.y - hitArea.height / 2,
-        width: hitArea.width,
-        height: hitArea.height
-      }
-    }
-    
-    const radiusX = 90 * 1.5
-    const radiusY = 90
+
+    const { centerX, centerY, radiusX, radiusY } = this.getRenderedBalloonEllipse(balloon)
     return {
-      x: balloon.x - radiusX,
-      y: balloon.y - radiusY,
+      x: centerX - radiusX,
+      y: centerY - radiusY,
       width: radiusX * 2,
       height: radiusY * 2
     }
