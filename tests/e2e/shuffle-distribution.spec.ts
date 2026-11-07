@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS } from './test-timeouts'
+import { ACTION_TIMEOUT_MS, INIT_TIMEOUT_MS, multiRoundTestTimeout } from './test-timeouts'
 
 /**
  * Shuffle Distribution E2E Tests
@@ -267,9 +267,8 @@ test.describe('Shuffle Distribution - 1280×800', () => {
   
   // CPU throttle test to verify round token uniqueness under slow conditions
   test('Count 3 Seed A with 4x CPU throttle: round tokens unique', async ({ page }) => {
-    test.setTimeout(180000) // 3 minutes for throttled execution
-    
     const rounds = 30
+    test.setTimeout(multiRoundTestTimeout(rounds))
     const count = 3
     
     // Enable 4x CPU throttling via CDP
@@ -297,10 +296,8 @@ test.describe('Shuffle Distribution - 1280×800', () => {
   
   for (const count of [3, 4, 5]) {
     test(`Count ${count} Seed A: deterministic shuffle distribution (30 rounds)`, async ({ page }) => {
-      // Set timeout for 60 rounds (2 runs of 30) with margin
-      test.setTimeout(120000) // 2 minutes
-      
       const rounds = 30
+      test.setTimeout(multiRoundTestTimeout(rounds * 2)) // 2 runs of 30 rounds
       
       // First run: record slots with Seed A
       await page.addInitScript(getMulberry32Code(SEED_A))
@@ -349,10 +346,8 @@ test.describe('Shuffle Distribution - 1280×800', () => {
     })
     
     test(`Count ${count} Seed B: deterministic shuffle distribution (30 rounds)`, async ({ page }) => {
-      // Set timeout for 30 rounds with margin
-      test.setTimeout(60000) // 1 minute
-      
       const rounds = 30
+      test.setTimeout(multiRoundTestTimeout(rounds))
       
       // Record slots with Seed B
       await page.addInitScript(getMulberry32Code(SEED_B))
@@ -387,9 +382,8 @@ test.describe('Shuffle Distribution - 1280×800', () => {
   // 2D Cell distribution tests for counts 4 and 5 (multi-row layouts)
   for (const count of [4, 5]) {
     test(`Count ${count} Seed A: 2D cell distribution - every cell visited (60 rounds)`, async ({ page }) => {
-      test.setTimeout(180000) // 3 minutes for 60 rounds
-      
       const rounds = 60
+      test.setTimeout(multiRoundTestTimeout(rounds))
       
       await page.addInitScript(getMulberry32Code(SEED_A))
       await page.goto('/')
@@ -439,9 +433,8 @@ test.describe('Shuffle Distribution - 1280×800', () => {
     })
     
     test(`Count ${count} Seed B: 2D cell distribution - every cell visited (60 rounds)`, async ({ page }) => {
-      test.setTimeout(180000) // 3 minutes for 60 rounds
-      
       const rounds = 60
+      test.setTimeout(multiRoundTestTimeout(rounds))
       
       await page.addInitScript(getMulberry32Code(SEED_B))
       await page.goto('/')
