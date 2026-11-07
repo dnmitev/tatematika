@@ -513,6 +513,18 @@ export class GameScene extends Phaser.Scene {
         balloonHeight = Math.max(minTarget, (availableHeight - margin) / 2)
       }
       
+      // Ensure desktop proportions for count 5 after sizing
+      if (this.scale.width >= 1024) {
+        const currentAspect = balloonWidth / balloonHeight
+        if (currentAspect > 1.05) {
+          // Too wide, increase height to fix ratio
+          balloonHeight = balloonWidth / 1.05
+        } else if (currentAspect < 0.75) {
+          // Too tall, increase width to fix ratio
+          balloonWidth = balloonHeight * 0.75
+        }
+      }
+      
       const finalTotalHeight = 2 * balloonHeight + margin
       const topMargin = (availableHeight - finalTotalHeight) / 2
       const y1 = hudTopSpace + topMargin + balloonHeight / 2
