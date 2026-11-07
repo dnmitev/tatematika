@@ -651,6 +651,8 @@ export class GameScene extends Phaser.Scene {
     if (count >= 4) {
       this.clearTargetJumpCorridor(positions, correctBalloonIndex, balloonWidth, margin, availableWidth)
     }
+
+    const fontSize = this.fitFormulaFontSize(balloonWidth, balloonHeight)
     
     const roundKey = this.gameState.round.balloons.map(b => b.id).join(',')
     if (roundKey !== this.colorRoundKey) {
@@ -674,7 +676,7 @@ export class GameScene extends Phaser.Scene {
       sprite.on('pointerdown', () => this.handleBalloonClick(balloon.id))
 
       const text = this.add.text(0, 0, balloon.formula.display, {
-        fontSize: `${this.formulaFontSize}px`,
+        fontSize: `${fontSize}px`,
         color: '#000000',
         fontStyle: 'bold'
       }).setOrigin(0.5)
@@ -698,6 +700,39 @@ export class GameScene extends Phaser.Scene {
     })
     
     this.currentJumpHeight = this.calculateJumpHeight()
+  }
+
+  /**
+   * Largest formula font (up to formulaFontSize) whose rendered text box keeps all four
+   * corners inside the balloon ellipse, measured on the real Phaser text. Never below
+   * 32 CSS px; balloon size and layout are not changed.
+   */
+  private fitFormulaFontSize(balloonWidth: number, balloonHeight: number): number {
+    const canvasWidth = this.game.canvas?.getBoundingClientRect().width || this.scale.width
+    const cssScale = canvasWidth / this.scale.width
+    const minFontSize = Math.ceil(32 / cssScale)
+    const fitLimit = 0.95
+    const rx = balloonWidth / 2
+    const ry = balloonHeight / 2
+    const probe = this.add.text(0, 0, '', { fontSize: `${this.formulaFontSize}px`, fontStyle: 'bold' })
+
+    const cornerRatio = (fontSize: number) => {
+      probe.setFontSize(fontSize)
+      let worst = 0
+      for (const balloon of this.gameState.round.balloons) {
+        probe.setText(balloon.formula.display)
+        const ratio = Math.pow(probe.width / 2 / rx, 2) + Math.pow(probe.height / 2 / ry, 2)
+        worst = Math.max(worst, ratio)
+      }
+      return worst
+    }
+
+    let fontSize = Math.floor(this.formulaFontSize)
+    while (fontSize > minFontSize && cornerRatio(fontSize) > fitLimit) {
+      fontSize--
+    }
+    probe.destroy()
+    return Math.max(fontSize, minFontSize)
   }
 
   /**
