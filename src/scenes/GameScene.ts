@@ -16,7 +16,23 @@ const HINT_OUTLINE_COLOR = 0xFF8C00
 const CUP_SVG = '<svg viewBox="0 0 64 64" width="100%" height="100%" aria-hidden="true" focusable="false"><path d="M18 8h28v14c0 9-6 16-14 16s-14-7-14-16z" fill="#FFC107" stroke="#B8860B" stroke-width="2"/><path d="M18 12H9c0 9 4 14 10 15M46 12h9c0 9-4 14-10 15" fill="none" stroke="#B8860B" stroke-width="4" stroke-linecap="round"/><rect x="28" y="38" width="8" height="10" fill="#FFC107" stroke="#B8860B" stroke-width="2"/><rect x="18" y="48" width="28" height="8" rx="2" fill="#FFC107" stroke="#B8860B" stroke-width="2"/></svg>'
 const RED_X_SVG = '<svg viewBox="0 0 64 64" width="100%" height="100%" aria-hidden="true" focusable="false"><path d="M14 14L50 50M50 14L14 50" stroke="#E53935" stroke-width="12" stroke-linecap="round"/></svg>'
 
+const CONFETTI_COLORS = [0xFF6B6B, 0xFFD93D, 0x6BCB77, 0x4D96FF, 0xFF8FCF, 0xA78BFA]
+// Below the top panel (depth 10) so confetti can never cover it
+const CONFETTI_DEPTH = 9
+const CONFETTI_GRAVITY = 300
+const CONFETTI_MAX_FALL_SPEED = 260
+const CONFETTI_BURST_INTERVAL_MS = 350
+const CAT_DANCE_BEAT_MS = 350
+const CAT_DANCE_HOP = 22
+
 type CatPose = 'idle' | 'walk' | 'jump' | 'landing' | 'happy'
+
+interface ConfettiPiece {
+  shape: Phaser.GameObjects.Rectangle
+  vx: number
+  vy: number
+  spin: number
+}
 
 interface BalloonSprite {
   id: string
@@ -78,6 +94,11 @@ export class GameScene extends Phaser.Scene {
   private formulaFontSize: number = 32
   private targetFontSize: number = 32
   private currentJumpHeight: number = 80
+  private confettiTopY: number = 0
+  private confetti: ConfettiPiece[] = []
+  private celebrating: boolean = false
+  private celebrationStartTime: number = 0
+  private nextConfettiBurstTime: number = 0
 
   constructor() {
     super({ key: 'GameScene' })
@@ -119,6 +140,9 @@ export class GameScene extends Phaser.Scene {
     const settings = loadSettings()
     this.gameState = createInitialState(settings)
     this.balloonSpeed = settings.balloonSpeed === 'medium' ? 50 : 30
+    // The scene instance is reused by scene.restart(), so effects from the last run are gone
+    this.confetti = []
+    this.celebrating = false
 
     this.scale.on('resize', this.handleResize, this)
     
@@ -147,7 +171,14 @@ export class GameScene extends Phaser.Scene {
     
     const settingsWasOpen = this.settingsUI?.isOpen() ?? false
     const levelCompleteWasVisible = this.levelCompleteUI?.isVisible() ?? false
-    const levelCompleteStars = this.gameState?.stars ?? 0
+    // The pop/bounce in progress decides when the locked action completes, so it must
+    // survive the sprites being rebuilt for the new size.
+    const animationById = new Map(this.balloonSprites.map(bs => [bs.id, {
+      isPopping: bs.isPopping,
+      popStartTime: bs.popStartTime,
+      isBouncing: bs.isBouncing,
+      bounceStartTime: bs.bounceStartTime
+    }]))
     
     if (this.settingsButton && this.settingsButton.parentElement) {
       this.settingsButton.remove()
@@ -164,14 +195,19 @@ export class GameScene extends Phaser.Scene {
     this.clearFeedbackIcon()
     this.calculateFontSizes()
     this.children.removeAll(true)
+    this.confetti = []
     
     this.add.rectangle(this.scale.width / 2, this.scale.height / 2, this.scale.width, this.scale.height, 0x87CEEB)
     this.createCat()
     this.createUI()
     this.createBalloons()
+    for (const bs of this.balloonSprites) {
+      const animation = animationById.get(bs.id)
+      if (animation) Object.assign(bs, animation)
+    }
     
     if (settingsWasOpen) {
-      this.settingsUI.open()
+      this.openSettings()
     }
     
     if (levelCompleteWasVisible) {
@@ -317,6 +353,7 @@ export class GameScene extends Phaser.Scene {
       color: '#FF1493',
       fontStyle: 'bold'
     }).setOrigin(0.5)
+    this.confettiTopY = titleY + titleSize / 2 + 8
 
     const hudBottomMargin = Math.max(80, this.targetFontSize + 40)
     const targetY = this.scale.height - hudBottomMargin + 15
@@ -987,6 +1024,9 @@ export class GameScene extends Phaser.Scene {
     this.clearFeedbackIcon()
     this.levelEndText = `${LEVEL_COMPLETE_TITLE} ${LEVEL_COMPLETE_MESSAGE(stars)}`
     this.playSound('level-complete')
+    this.celebrating = true
+    this.celebrationStartTime = this.time.now
+    this.nextConfettiBurstTime = 0
     
     this.levelCompleteUI.show(
       stars,
@@ -997,6 +1037,7 @@ export class GameScene extends Phaser.Scene {
 
   private handlePlayAgain() {
     this.levelCompleteUI.hide()
+    this.celebrating = false
     this.catIsJumping = false
     this.catJumpTime = 0
     this.pendingJumpBalloonId = null
@@ -1017,6 +1058,7 @@ export class GameScene extends Phaser.Scene {
 
   private handleToMenu() {
     this.levelCompleteUI.hide()
+    this.celebrating = false
     this.scene.restart()
   }
 
@@ -1114,6 +1156,7 @@ export class GameScene extends Phaser.Scene {
               balloon.popStartTime = time
               this.popAnimationStartTime = time
               this.playSound('pop')
+              this.spawnConfetti(balloon.x, balloon.y, 24)
             }
             this.showFeedbackIcon('correct')
             this.happyUntil = time + 1200
@@ -1225,7 +1268,67 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    if (this.celebrating) this.updateCelebration(time)
+    this.updateConfetti(delta)
+
     this.drawCat(this.cat, this.catX, this.catY)
+  }
+
+  /** §6 level end: the cat hops happily in place while confetti keeps falling */
+  private updateCelebration(time: number) {
+    if (time >= this.nextConfettiBurstTime) {
+      for (let i = 0; i < 3; i++) {
+        this.spawnConfetti(Phaser.Math.Between(40, this.scale.width - 40), this.confettiTopY, 6)
+      }
+      this.nextConfettiBurstTime = time + CONFETTI_BURST_INTERVAL_MS
+    }
+
+    if (!this.catIsJumping && !this.pendingJumpBalloonId) {
+      const beat = (time - this.celebrationStartTime) / CAT_DANCE_BEAT_MS
+      this.catY = this.catJumpStartY - Math.abs(Math.sin(beat * Math.PI)) * CAT_DANCE_HOP
+      this.happyUntil = time + CAT_DANCE_BEAT_MS
+    }
+  }
+
+  // Pieces start below the top panel and title and only ever move down, keep a constant
+  // colour and opacity (no blinking) and are removed once they fall past the bottom edge.
+  private spawnConfetti(x: number, y: number, count: number) {
+    const startY = Math.max(y, this.confettiTopY)
+    for (let i = 0; i < count; i++) {
+      const color = CONFETTI_COLORS[i % CONFETTI_COLORS.length]
+      const shape = this.add.rectangle(
+        x + Phaser.Math.Between(-20, 20),
+        startY + Phaser.Math.Between(0, 10),
+        8,
+        12,
+        color
+      )
+      shape.setAngle(Phaser.Math.Between(0, 359)).setDepth(CONFETTI_DEPTH)
+      this.confetti.push({
+        shape,
+        vx: Phaser.Math.Between(-160, 160),
+        vy: Phaser.Math.Between(20, 140),
+        spin: Phaser.Math.Between(-360, 360)
+      })
+    }
+  }
+
+  private updateConfetti(delta: number) {
+    if (this.confetti.length === 0) return
+    const dt = delta / 1000
+    const bottom = this.scale.height + 20
+    this.confetti = this.confetti.filter(piece => {
+      piece.vy = Math.min(piece.vy + CONFETTI_GRAVITY * dt, CONFETTI_MAX_FALL_SPEED)
+      piece.vx *= 0.99
+      const shape = piece.shape
+      shape.setPosition(shape.x + piece.vx * dt, shape.y + piece.vy * dt)
+      shape.setAngle(shape.angle + piece.spin * dt)
+      if (shape.y > bottom || shape.x < -20 || shape.x > this.scale.width + 20) {
+        shape.destroy()
+        return false
+      }
+      return true
+    })
   }
 
   /** К6: same balloons, sprites and colours move back up to where the round started */

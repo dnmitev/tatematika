@@ -49,12 +49,21 @@ All visual assets in this game are created programmatically using Phaser 3's Gra
 **Location**: `index.html` and scene background  
 **Description**: Sky blue (#87CEEB) background representing a clear sky
 
-### Confetti (Level Complete)
+### Confetti (correct pop and level end)
 
 **Source**: Programmatically created using Phaser.GameObjects.Rectangle  
 **License**: CC0 / Public Domain (created specifically for this project)  
-**Location**: `src/scenes/LevelCompleteScene.ts`, method `createConfetti()`  
-**Description**: Small colored rectangles animated to fall from top to bottom
+**Location**: `src/scenes/GameScene.ts`, methods `spawnConfetti()` and `updateConfetti()`  
+**Description**: Small 8×12 px rectangles in the balloon palette plus pink (#FF8FCF):
+- Correct pop: one burst of 24 pieces from the popped balloon
+- Level end: small showers from below the title every 350 ms while „Ти успя!“ is shown
+- Pieces fall and turn smoothly with constant colour and opacity (no blinking), start below the top panel and title, never move up into the panel, and are drawn under the panel
+
+### Level-end dance
+
+**Source**: Native Phaser animation in `src/scenes/GameScene.ts`, method `updateCelebration()`  
+**License**: CC0 / Public Domain (created specifically for this project)  
+**Description**: While „Ти успя!“ is shown, the cat hops in place (22 px, one hop every 350 ms) with its happy smile and tail wag from `drawCat()`
 
 ## Fonts
 
