@@ -1240,6 +1240,7 @@ export class GameScene extends Phaser.Scene {
       this.gameState = addStar(this.gameState)
 
       if (isLevelComplete(this.gameState)) {
+        this.updateUI()
         this.showLevelComplete()
       } else {
         this.gameState.round = handleCorrectPop(this.gameState.round, this.gameState.settings)
