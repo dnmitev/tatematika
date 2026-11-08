@@ -30,6 +30,21 @@ async function clickBalloon(page: any, balloonId: string) {
   await page.mouse.click(point.x, point.y)
 }
 
+async function readHudStars(page: any): Promise<{ text: string; count: number | null; visible: boolean }> {
+  return page.evaluate(() => {
+    const scene = window.__tatematika!.getGame().scene.getScene('GameScene') as any
+    const label = scene.children.list.find((child: any) =>
+      child.type === 'Text' && typeof child.text === 'string' && child.text.includes('⭐'))
+    if (!label) return { text: '', count: null, visible: false }
+    const match = String(label.text).match(/(\d+)/)
+    return {
+      text: String(label.text),
+      count: match ? Number(match[1]) : null,
+      visible: label.visible !== false && label.alpha > 0
+    }
+  })
+}
+
 async function holdWhen(page: any, kind: 'pop' | 'bounce') {
   await page.evaluate((which: 'pop' | 'bounce') => {
     const scene = window.__tatematika!.getGame().scene.getScene('GameScene') as any
@@ -273,6 +288,8 @@ test('a correct pop shows confetti in the active scene', async ({ page }) => {
   ).toBe(true)
 })
 
+// §4 rule 7 and the §5 table allow 5–20 correct balloons per level. Five pops here
+// is that setting, not the default of 10 quoted in §6.
 test('level end shows confetti and a dancing cat in the active scene', async ({ page }) => {
   test.setTimeout(multiRoundTestTimeout(6))
   await page.goto('/')
@@ -404,5 +421,85 @@ test('level end shows confetti and a dancing cat in the active scene', async ({ 
     activeScene: true,
     dancingCat: true,
     confetti: true
+  })
+})
+
+test('default level end shows the same star count on the HUD, in state, and on the overlay', async ({ page }) => {
+  // docs/games/kote-balonche.md §4 rule 7 and §6: a level is 10 correct balloons
+  // by default, and the celebration says how many stars were collected.
+  test.setTimeout(multiRoundTestTimeout(10))
+  await page.goto('/')
+  await page.waitForFunction(() => window.__tatematika !== undefined, { timeout: INIT_TIMEOUT_MS })
+  await waitIdle(page)
+
+  const levelLength = await page.evaluate(() => window.__tatematika!.getGameState().settings.correctBalloonsPerLevel)
+  expect(levelLength, 'a fresh game uses the spec default of 10 correct balloons per level').toBe(10)
+
+  await page.evaluate((length: number) => {
+    const scene = window.__tatematika!.getGame().scene.getScene('GameScene') as any
+    ;(window as any).__hudAfterLastPop = null
+    const read = () => {
+      const label = scene.children.list.find((child: any) =>
+        child.type === 'Text' && typeof child.text === 'string' && child.text.includes('⭐'))
+      const match = label ? String(label.text).match(/(\d+)/) : null
+      return {
+        text: label ? String(label.text) : '',
+        count: match ? Number(match[1]) : null
+      }
+    }
+    scene.events.on('postupdate', () => {
+      if ((window as any).__hudAfterLastPop) return
+      if (scene.gameState.stars < length) return
+      ;(window as any).__hudAfterLastPop = read()
+    })
+  }, levelLength)
+
+  for (let pop = 1; pop < levelLength; pop++) {
+    await waitIdle(page)
+    const correctId = await page.evaluate(() => {
+      return window.__tatematika!.getGameState().balloons.find((balloon: any) => balloon.isCorrect).id
+    })
+    await clickBalloon(page, correctId)
+    await expect.poll(async () => {
+      const stars = await page.evaluate(() => window.__tatematika!.getGameState().stars)
+      const hud = await readHudStars(page)
+      if (stars === pop && hud.visible && hud.count === pop) return 'counted'
+      return `correct pop ${pop} must add exactly one star (state=${stars}, hud=${hud.text || 'missing'})`
+    }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe('counted')
+  }
+
+  await waitIdle(page)
+  const lastId = await page.evaluate(() => {
+    return window.__tatematika!.getGameState().balloons.find((balloon: any) => balloon.isCorrect).id
+  })
+  await clickBalloon(page, lastId)
+
+  await expect.poll(async () => {
+    const shown = await page.locator('[data-testid="level-complete-message"]').isVisible()
+    if (shown) return 'shown'
+    const stars = await page.evaluate(() => window.__tatematika!.getGameState().stars)
+    return `level end never appeared (stars=${stars})`
+  }, { timeout: ACTION_TIMEOUT_MS, intervals: [50] }).toBe('shown')
+
+  const hudAtEnd = await readHudStars(page)
+  const hudAfterLastPop = await page.evaluate(() => (window as any).__hudAfterLastPop as { text: string; count: number | null })
+  const stateStars = await page.evaluate(() => window.__tatematika!.getGameState().stars)
+  const overlayText = (await page.locator('[data-testid="level-complete-message"]').innerText()).trim()
+  const overlayCount = Number(overlayText.match(/(\d+)/)?.[1])
+
+  expect(
+    hudAtEnd.count,
+    `HUD at level end (${hudAtEnd.text || 'missing'}) must equal the HUD right after the last pop (${hudAfterLastPop?.text || 'missing'})`
+  ).toBe(hudAfterLastPop?.count)
+  expect({
+    hud: hudAtEnd.count,
+    hudVisible: hudAtEnd.visible,
+    state: stateStars,
+    overlay: overlayCount
+  }, `HUD "${hudAtEnd.text}", state ${stateStars}, and overlay "${overlayText}" must all equal the ${levelLength} accepted correct pops`).toEqual({
+    hud: levelLength,
+    hudVisible: true,
+    state: levelLength,
+    overlay: levelLength
   })
 })
