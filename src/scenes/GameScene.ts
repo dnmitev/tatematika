@@ -577,7 +577,16 @@ export class GameScene extends Phaser.Scene {
         // Single row = same Y for all, so no corridor conflicts
         const maxWidthForRow = (availableWidth - (count + 1) * margin) / count
         if (balloonWidth > maxWidthForRow) {
+          // Shrink both axes together so the ellipse keeps the aspect it had
+          // before the row was squeezed (К18).
+          const aspect = balloonHeight > 0 ? balloonWidth / balloonHeight : 1
           balloonWidth = Math.max(minTarget, maxWidthForRow)
+          balloonHeight = balloonWidth / aspect
+          if (balloonHeight > availableHeight && availableHeight > 0) {
+            const scale = availableHeight / balloonHeight
+            balloonWidth *= scale
+            balloonHeight *= scale
+          }
         }
         
         const totalWidth = count * balloonWidth + (count - 1) * margin
@@ -854,12 +863,18 @@ export class GameScene extends Phaser.Scene {
     graphics.strokePath()
   }
 
+  /** „Ти успя!“ is the only control while it is open: no balloon choice, jump or move. */
+  private isCelebrationOpen(): boolean {
+    return this.celebrating || (this.levelCompleteUI?.isVisible() ?? false)
+  }
+
   private handleBalloonClick(balloonId: string) {
     this.clickBalloon(balloonId)
   }
 
   private handlePointerDown(pointer: Phaser.Input.Pointer) {
     if (this.settingsUI && this.settingsUI.isOpen()) return
+    if (this.isCelebrationOpen()) return
     
     for (const balloon of this.balloonSprites) {
       if (balloon.sprite && balloon.sprite.input) {
@@ -1064,6 +1079,7 @@ export class GameScene extends Phaser.Scene {
 
   private handleKeyDown(event: KeyboardEvent) {
     if (this.settingsUI && this.settingsUI.isOpen()) return
+    if (this.isCelebrationOpen()) return
     
     // K12-K16: Full input ignore during action lifecycle
     if (this.actionLocked) return
@@ -1083,6 +1099,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private jump() {
+    if (this.isCelebrationOpen()) return
     if (this.catIsJumping) return
     
     const nearestBalloon = this.findNearestBalloon()
@@ -1440,6 +1457,7 @@ export class GameScene extends Phaser.Scene {
   public clickBalloon(balloonId: string) {
     const balloon = this.balloonSprites.find(b => b.id === balloonId)
     if (!balloon) return
+    if (this.isCelebrationOpen()) return
     
     // K12-K16: Full input ignore during action lifecycle
     if (this.actionLocked) {
@@ -1457,6 +1475,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   public pressKey(key: 'left' | 'right' | 'space' | 'up') {
+    if (this.isCelebrationOpen()) return
     // K12-K16: Full input ignore during action lifecycle
     if (this.actionLocked) return
     
